@@ -40,9 +40,12 @@ func (execUDS) Remove(name string) error {
 // error is what the caller sees; a rollback-remove failure is swallowed (the
 // deploy error is the actionable one). The caller writes the install record only
 // after Deploy returns nil.
-func Deploy(u UDS, ref string) error {
+//
+// ref is the OCI bundle reference passed to `uds deploy`; name is the package
+// name passed to `uds remove` on rollback (decision #3: rollback by name, not ref).
+func Deploy(u UDS, ref, name string) error {
 	if err := u.Deploy(ref); err != nil {
-		_ = u.Remove(ref) // best-effort cleanup; ignore its error
+		_ = u.Remove(name) // best-effort rollback by package name (decision #3)
 		return fmt.Errorf("deploy: %w", err)
 	}
 	return nil

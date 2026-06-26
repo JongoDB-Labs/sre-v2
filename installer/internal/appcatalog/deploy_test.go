@@ -21,7 +21,7 @@ func (f *fakeUDS) Remove(name string) error { f.removed = name; f.removeCount++;
 
 func TestDeploy_HappyPath(t *testing.T) {
 	fu := &fakeUDS{}
-	if err := Deploy(fu, "ghcr.io/x/cosmos@sha256:abc"); err != nil {
+	if err := Deploy(fu, "ghcr.io/x/cosmos@sha256:abc", "cosmos"); err != nil {
 		t.Fatalf("Deploy: %v", err)
 	}
 	if fu.deployed != "ghcr.io/x/cosmos@sha256:abc" {
@@ -34,12 +34,16 @@ func TestDeploy_HappyPath(t *testing.T) {
 
 func TestDeploy_RollsBackOnFailure(t *testing.T) {
 	fu := &fakeUDS{deployErr: errors.New("reconcile timeout")}
-	err := Deploy(fu, "ghcr.io/x/cosmos@sha256:abc")
+	err := Deploy(fu, "ghcr.io/x/cosmos@sha256:abc", "cosmos")
 	if err == nil {
 		t.Fatal("Deploy should return the deploy error")
 	}
 	if fu.removeCount != 1 {
 		t.Errorf("a failed deploy should best-effort remove once, got %d", fu.removeCount)
+	}
+	// rollback must use the package name, not the OCI ref
+	if fu.removed != "cosmos" {
+		t.Errorf("rollback removed %q, want package name %q", fu.removed, "cosmos")
 	}
 	if !strings.Contains(err.Error(), "reconcile timeout") {
 		t.Errorf("error should wrap the deploy failure, got %v", err)
