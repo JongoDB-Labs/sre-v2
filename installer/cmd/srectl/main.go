@@ -30,6 +30,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(
 		newPreflightCmd(),
 		newInstallCmd(),
+		newAppCmd(),
 		newVersionCmd(),
 	)
 	return root
