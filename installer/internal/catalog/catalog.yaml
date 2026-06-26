@@ -1,0 +1,53 @@
+# SRE substrate catalog — the packages the installer can lay down, mirroring
+# bundle/uds-bundle.yaml. Each entry is one UDS package (a UDS Core layer or a
+# platform data-operator). `required` entries are always deployed; the rest are
+# user-selectable in the wizard.
+#
+# Keep this in lock-step with bundle/uds-bundle.yaml — drift here means the
+# installer offers packages the bundle can't deliver.
+version: "1.7.0" # tracks the UDS Core version the bundle pins
+
+layers:
+  - id: init
+    name: "Zarf init"
+    kind: init
+    required: true
+    description: "Zarf bootstrap — in-cluster registry + mutating agent (airgap seam)."
+
+  - id: core-base
+    name: "UDS Core (base)"
+    kind: core
+    required: true
+    description: "Istio ambient mesh + the Pepr uds-operator — the secure-by-default core."
+
+  - id: core-identity-authorization
+    name: "Identity & Authorization"
+    kind: core
+    required: false
+    description: "Keycloak + Authservice — the shared IdP every app SSOs through."
+
+  - id: core-runtime-security
+    name: "Runtime Security"
+    kind: core
+    required: false
+    description: "Falco — runtime threat detection, the continuous-monitoring signal."
+
+  - id: core-monitoring
+    name: "Monitoring"
+    kind: core
+    required: false
+    description: "Prometheus + Grafana — shared metrics and dashboards."
+
+operators:
+  - id: pgo
+    name: "CrunchyData PGO"
+    kind: operator
+    required: true
+    description: "Postgres operator (cluster-wide); apps declare their own PostgresCluster."
+
+  - id: minio
+    name: "MinIO object store"
+    kind: operator
+    required: false
+    status: pending
+    description: "Object storage operator — packaging pending (operator vs shared instance)."
