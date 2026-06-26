@@ -2,6 +2,7 @@ package appcatalog
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -67,8 +68,12 @@ func TestState_LoadEmptyWhenAbsent(t *testing.T) {
 func TestState_Delete(t *testing.T) {
 	fk := &fakeKube{}
 	s := State{Kube: fk}
-	_ = s.Put("cosmos", Record{Version: "2.102.0", Source: "oci:x", Digest: "sha256:abc"})
-	_ = s.Put("other", Record{Version: "1.0.0", Source: "oci:y", Digest: "sha256:def"})
+	if err := s.Put("cosmos", Record{Version: "2.102.0", Source: "oci:x", Digest: "sha256:abc"}); err != nil {
+		t.Fatalf("setup Put: %v", err)
+	}
+	if err := s.Put("other", Record{Version: "1.0.0", Source: "oci:y", Digest: "sha256:def"}); err != nil {
+		t.Fatalf("setup Put: %v", err)
+	}
 	if err := s.Delete("cosmos"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
@@ -96,6 +101,43 @@ func TestState_InstalledPackagesError(t *testing.T) {
 	_, err := State{Kube: &fakeKube{listErr: errors.New("no cluster")}}.InstalledPackages()
 	if err == nil {
 		t.Error("InstalledPackages should surface a list error")
+	}
+}
+
+// TestMarshalUnmarshalRoundTrip verifies that marshalRecords/unmarshalRecords
+// are pure inverses of each other on all Record fields.
+func TestMarshalUnmarshalRoundTrip(t *testing.T) {
+	in := map[string]Record{
+		"cosmos": {
+			Version:     "2.102.0",
+			Source:      "oci:ghcr.io/jongodb-labs/bundles/cosmos",
+			Digest:      "sha256:abc123",
+			InstalledAt: "2026-06-26T00:00:00Z",
+			InstalledBy: "maggie",
+		},
+		"keycloak": {
+			Version:     "1.0.0",
+			Source:      "oci:ghcr.io/jongodb-labs/bundles/keycloak",
+			Digest:      "sha256:def456",
+			InstalledAt: "2026-06-25T12:00:00Z",
+			InstalledBy: "admin",
+		},
+	}
+	data, err := marshalRecords(in)
+	if err != nil {
+		t.Fatalf("marshalRecords: %v", err)
+	}
+	// Re-encode the map as YAML bytes (the format unmarshalRecords expects).
+	raw, err := yaml.Marshal(data)
+	if err != nil {
+		t.Fatalf("yaml.Marshal: %v", err)
+	}
+	got, err := unmarshalRecords(raw)
+	if err != nil {
+		t.Fatalf("unmarshalRecords: %v", err)
+	}
+	if !reflect.DeepEqual(in, got) {
+		t.Errorf("round-trip mismatch\n  want: %+v\n  got:  %+v", in, got)
 	}
 }
 

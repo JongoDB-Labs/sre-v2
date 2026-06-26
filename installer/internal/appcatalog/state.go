@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
+	"os/exec"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -33,8 +33,7 @@ type Record struct {
 	Digest string `yaml:"digest"`
 	// InstalledAt is the RFC3339 install timestamp.
 	InstalledAt string `yaml:"installedAt"`
-	// InstalledBy is the actor: the kubeconfig current-context user for CLI
-	// invocations (OIDC sub is deferred to the srectl serve path).
+	// InstalledBy is the kubeconfig current-context user (the CLI actor).
 	InstalledBy string `yaml:"installedBy"`
 }
 
@@ -176,12 +175,16 @@ func (execKube) EnsureNamespace(ns string) error {
 }
 
 // GetConfigMap returns the ConfigMap's .data as YAML, or errMissingConfigMap
-// when the object does not exist.
+// when the object does not exist. Any other error (permission, network,
+// kubeconfig) is returned wrapped so callers can distinguish real failures.
 func (execKube) GetConfigMap(ns, name string) ([]byte, error) {
 	out, err := commandContext("kubectl", "get", "configmap", name, "-n", ns, "-o", "jsonpath={.data}").Output()
 	if err != nil {
-		// kubectl exits non-zero when the object is absent; treat as missing.
-		return nil, errMissingConfigMap
+		var ee *exec.ExitError
+		if errors.As(err, &ee) && (strings.Contains(string(ee.Stderr), "NotFound") || strings.Contains(string(ee.Stderr), "not found")) {
+			return nil, errMissingConfigMap
+		}
+		return nil, fmt.Errorf("appcatalog: get configmap %s: %w", name, err)
 	}
 	return out, nil
 }
@@ -200,11 +203,16 @@ func (execKube) ApplyConfigMap(ns, name string, data map[string]string) error {
 			fmt.Fprintf(&b, "    %s\n", line)
 		}
 	}
-	tmp := filepath.Join(os.TempDir(), "sre-appcatalog-installs.yaml")
+	tmpFile, err := os.CreateTemp("", "sre-appcatalog-installs-*.yaml")
+	if err != nil {
+		return fmt.Errorf("appcatalog: create temp file: %w", err)
+	}
+	tmp := tmpFile.Name()
+	tmpFile.Close()
+	defer os.Remove(tmp)
 	if err := writeFile(tmp, b.String()); err != nil {
 		return err
 	}
-	defer os.Remove(tmp)
 	if out, err := commandContext("kubectl", "apply", "-f", tmp).CombinedOutput(); err != nil {
 		return fmt.Errorf("kubectl apply configmap: %w: %s", err, out)
 	}
