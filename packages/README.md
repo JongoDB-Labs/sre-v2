@@ -6,7 +6,7 @@ isolated instance** against them. Apps never bundle these — they declare a CR.
 | Service | Package | App declares | Isolation |
 |---|---|---|---|
 | **Postgres** | [`pgo/`](pgo/) — CrunchyData PGO 6.0.2 (cluster-wide) | a `PostgresCluster` CR in its namespace | own DB + pgBackRest backups per app |
-| **Object store** | `minio/` *(pending — see below)* | buckets (or a Tenant) | per-app buckets |
+| **Object store** | [`minio/`](minio/) — MinIO Operator 7.1.1 (cluster-wide) | a `Tenant` CR in its namespace | own MinIO + buckets per app |
 
 ## How an app uses a data-service
 
@@ -17,19 +17,24 @@ package doesn't need them. The app connects over the PGO-issued TLS (mount the c
 CA, `sslmode=require&sslrootcert=…`) and must allow `KubeAPI` egress in its UDS
 `Package` (PGO/Patroni uses the API as its DCS — see the runbook gotcha #11).
 
-## MinIO — decision pending
+## MinIO — the Operator, lab-only (⚠️ upstream EOL — revisit)
 
-Today MinIO is a **standalone StatefulSet inside the cosmos chart** (not a substrate
-service). Two ways to make it a shared data-service, to settle before packaging:
+Packaged the **MinIO Operator** with per-app `Tenant` CRs, for parity with PGO (shared
+operator / isolated data). See [`minio/`](minio/) for the package + a `Tenant` example
+(object-lock for WORM).
 
-- **MinIO Operator** (per-app `Tenant` CRs) — strongest isolation, matches the
-  "shared operator / isolated data" model; heavier; a bigger cosmos refactor.
-- **Shared MinIO instance + per-app buckets** — simpler, closest to today's setup
-  (just move the StatefulSet to the substrate); the app's init creates its buckets.
+**⚠️ Caveat that shapes this:** `minio/operator` was **archived 2026-03-20** — MinIO
+moved to the commercial AIStor line, so v7.1.1 is the last AGPL release (no upstream
+updates). It's pinned and works, and MinIO is **lab/baseline only** (prod swaps in
+external FIPS S3 per the install posture), so it's acceptable *for the lab* — but the
+object-store choice should be **revisited** (a maintained operator, a shared MinIO server
+without the EOL operator, or external S3 even in lab) before it earns a longer life.
 
-For **prod/DoD**, external FIPS S3 replaces MinIO entirely (per the install posture),
-so MinIO is the **lab/baseline** object-store only. Leaning toward the operator for
-parity with PGO; tracked as the next data-service package + the cosmos MinIO refactor.
+Because of that, **cosmos is intentionally NOT migrated onto it yet** — it keeps its
+working standalone MinIO StatefulSet. The `Tenant`-CR refactor (buckets incl. the AU-9
+object-locked WORM bucket, TLS endpoint, SOPS creds, retention/IAM init Job) is outlined
+and **deferred** — we don't couple the app to an archived operator without a deliberate
+call.
 
 ## Versions
 

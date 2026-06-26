@@ -1,0 +1,48 @@
+# MinIO Operator — an SRE shared data-service (the lab/baseline object store).
+#
+# Cluster-wide: any mission app creates a `Tenant` CR (minio.min.io/v2) in its OWN
+# namespace and the operator reconciles it into an isolated, S3-compatible MinIO —
+# its own buckets (incl. object-locked/WORM) + credentials. Shared operator,
+# isolated per-app object stores — the substrate's object-storage service, mirroring
+# how PGO serves Postgres.
+#
+# For prod/DoD the install posture swaps MinIO out for an external FIPS S3, so this
+# operator is the LAB/BASELINE object store only (not a prod dependency).
+#
+# ⚠️  UPSTREAM EOL: minio/operator was ARCHIVED 2026-03-20 (MinIO moved to the commercial
+# AIStor line); v7.1.1 is the last AGPL release. Pinned + working for the lab baseline,
+# but it gets NO upstream updates. Acceptable here only because (a) it's lab-only and
+# (b) prod uses external FIPS S3 — revisit with a maintained object store (or external S3
+# even in lab) before relying on it longer-term. cosmos is NOT migrated onto it yet.
+#
+# Bundled by ../../bundle/uds-bundle.yaml. Standalone build/deploy:
+#   zarf package create packages/minio && zarf package deploy zarf-package-minio-*.tar.zst
+kind: ZarfPackageConfig
+metadata:
+  name: minio
+  version: "7.1.1"
+  description: "MinIO Operator — SRE object-store data-service (apps create Tenant CRs)"
+
+components:
+  - name: minio
+    required: true
+    description: "MinIO operator (cluster-wide) + the minio-server image apps' Tenants pull"
+    charts:
+      # Classic Helm repo (not OCI — the operator chart isn't published to a registry
+      # the way PGO's is). `repoName` is the chart name in that repo; `name` is the
+      # Zarf-local (unique) component-chart name.
+      - name: minio-operator
+        url: https://operator.min.io
+        repoName: operator
+        version: 7.1.1
+        namespace: minio-operator
+    images:
+      - quay.io/minio/operator:v7.1.1
+      # The operator also runs an init+sidecar on each Tenant pod; by default it uses
+      # the SAME operator image above. operator-sidecar exists as a split-out image but
+      # is NOT the chart default, so it isn't carried here.
+      #
+      # MinIO-server image apps' Tenants pull — the substrate carries it so mission apps
+      # don't bundle it (this is the version the v7.1.1 tenant chart pins, matching the
+      # operator release line):
+      - quay.io/minio/minio:RELEASE.2025-04-08T15-41-24Z
