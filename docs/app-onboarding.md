@@ -119,3 +119,47 @@ backend) pulls the **signed** app package from local / OCI / GitHub and
 `uds`/`zarf` deploys it; the `Package` CR auto-wires §1–§4. First org/admin is minted
 by `bootstrap-org` (cosmos-v2 `prisma/seed/bootstrap-org.ts`). cosmos is the
 reference implementation of every section above.
+
+## Round-2 acceptance — deploy cosmos via the catalog
+
+This is the round-2 "MVP done" bar (app-catalog spec §11): cosmos, re-deployed
+**through `srectl app`**, wiring substrate cohesion automatically. It runs against
+the live SRE (RKE2 + UDS Core) with a reachable bundle registry and the `uds`,
+`zarf`, `cosign`, `kubectl` binaries on PATH. It is a manual/integration check —
+the unit suite (`go test ./...`) already covers the logic with fakes.
+
+Preconditions:
+- The substrate is up and `kubectl get nodes` is Ready.
+- PGO is installed (cosmos `requires: [postgres]`); else expect the advisory
+  `missing-require` warning and a degraded cosmos.
+- `catalog.yaml` (repo root) lists cosmos as entry #1.
+
+Steps:
+1. Build: `cd installer && go build -o /tmp/srectl ./cmd/srectl`
+2. List the catalog — cosmos appears:
+   `/tmp/srectl app list`
+   Expect a row: `cosmos  2.102.0  oci:ghcr.io/jongodb-labs/bundles/cosmos  …`
+3. Install through the catalog:
+   `/tmp/srectl app install cosmos`
+   Expect, in order: `resolved cosmos → …@sha256:…`, `signature verified …`,
+   any advisory warnings, `deployed cosmos`, `recorded install of cosmos 2.102.0`.
+   (If the signature does not verify, the command MUST abort here with the
+   expected-identity message and never reach `uds deploy` — fail-closed.)
+4. Cohesion wired (the authoritative post-deploy check):
+   - `kubectl get virtualservice -A | grep cosmos` → a VirtualService exists.
+   - If cosmos declares `sso`: `kubectl -n keycloak get secret keycloak-client-secrets -o yaml | grep cosmos` → a client entry exists.
+5. Record written:
+   `kubectl -n sre-system get configmap sre-appcatalog-installs -o yaml`
+   → a `cosmos:` key with version/source/digest/installedAt/installedBy.
+6. Status is green and drift-free:
+   `/tmp/srectl app status cosmos`
+   → `cosmos: installed`, the record fields, and `live UDS Package: true` with no
+   drift note.
+7. Drift visibility (optional): `/tmp/srectl app list --installed` shows cosmos
+   with `LIVE true` and no drift note.
+
+Teardown (optional): `/tmp/srectl app remove cosmos` → `removed cosmos and pruned
+its record`; re-running `app status cosmos` reports `not installed`.
+
+Pass criterion: steps 2–6 succeed as described; the VirtualService (and SSO client
+if declared) appear; the record is written; `app status` is green. That is MVP done.
