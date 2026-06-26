@@ -1,0 +1,24 @@
+# Secrets — never commit plaintext or keys (SOPS-encrypted files are fine)
+*.dec.yaml
+*.plain.yaml
+keys.txt
+*.age
+age.key
+
+# Installer (Go) build output
+/installer/bin/
+*.test
+*.out
+
+# Zarf / UDS build artifacts
+*.tar.zst
+zarf-sbom/
+.uds-cache/
+
+# Rendered install configs (per-deployment, not source)
+uds-config.yaml
+values.overlay.yaml
+
+# OS / editor
+.DS_Store
+*.swp

@@ -1,0 +1,43 @@
+# SRE substrate bundle — UDS Core + platform data-operators. App-agnostic: this
+# stands up the runtime; mission apps (cosmos, …) deploy onto it separately in
+# round 2 (local / OCI / GitHub).
+#
+#   uds create bundle && uds deploy uds-bundle-sre-*.tar.zst --confirm
+#
+# Pin every UDS Core layer to ONE version (mismatched layers drift — learned the
+# hard way). `upstream` for lab; swap to `registry1` (Iron Bank) for hardened/ATO.
+kind: UDSBundle
+metadata:
+  name: sre
+  version: "1.7.0"          # tracks the UDS Core version
+  description: "Secure Runtime Environment — UDS Core + PGO/MinIO operators"
+
+packages:
+  - name: init
+    repository: ghcr.io/defenseunicorns/packages/init
+    ref: v0.79.0
+  - name: core-base
+    repository: ghcr.io/defenseunicorns/packages/uds/core-base
+    ref: 1.7.0-upstream
+  - name: core-identity-authorization      # Keycloak + Authservice — the shared IdP
+    repository: ghcr.io/defenseunicorns/packages/uds/core-identity-authorization
+    ref: 1.7.0-upstream
+  - name: core-runtime-security            # Falco — the ConMon signal
+    repository: ghcr.io/defenseunicorns/packages/uds/core-runtime-security
+    ref: 1.7.0-upstream
+  - name: core-monitoring                  # Prometheus + Grafana — shared observability
+    repository: ghcr.io/defenseunicorns/packages/uds/core-monitoring
+    ref: 1.7.0-upstream
+
+  # Platform data-service OPERATORS — mission apps create their OWN instances
+  # (PostgresCluster CRs, MinIO buckets) against these shared operators.
+  # TODO(migration): author these Zarf packages under packages/.
+  # - name: pgo
+  #   path: ../packages/pgo
+  #   ref: "5.7"
+  # - name: minio-operator
+  #   path: ../packages/minio-operator
+  #   ref: "..."
+
+  # NOTE: cosmos (and every other mission app) is NOT in this bundle — apps are
+  # deployed onto a running SRE in round 2, not baked into the substrate.
