@@ -28,9 +28,12 @@ type fakeUDS struct {
 func (f *fakeUDS) Deploy(ref string) error  { f.deployed = ref; return f.deployErr }
 func (f *fakeUDS) Remove(name string) error { f.removed = name; return nil }
 
-type fakeInspect struct{ out []byte }
+type fakeInspect struct {
+	out []byte
+	err error
+}
 
-func (f fakeInspect) Inspect(string) ([]byte, error) { return f.out, nil }
+func (f fakeInspect) Inspect(string) ([]byte, error) { return f.out, f.err }
 
 type fakeKube struct {
 	cm           map[string]string
@@ -180,5 +183,65 @@ func TestAdapterFor_GitHubDeferred(t *testing.T) {
 	_, err := adapterFor(appcatalog.Entry{Source: appcatalog.Source{Type: appcatalog.SourceGitHub}}, fakeInspect{})
 	if err == nil {
 		t.Error("github adapter is deferred and should error")
+	}
+}
+
+// TestRunAppInstall_AllowUnsignedDoesNotBypassSignedSource pins decision #2:
+// --allow-unsigned MUST NOT weaken verification for signed (OCI / digest-bearing)
+// sources. When the Cosign fake fails, the install must abort before deploy and
+// before writing a state record — even if AllowUnsigned is true.
+func TestRunAppInstall_AllowUnsignedDoesNotBypassSignedSource(t *testing.T) {
+	kube := &fakeKube{}
+	uds := &fakeUDS{}
+	d := testDeps(kube, uds)
+	d.AllowUnsigned = true
+	d.Cosign = fakeCosign{err: errors.New("no matching signatures")}
+
+	var out bytes.Buffer
+	if err := runAppInstall(&out, d, "cosmos"); err == nil {
+		t.Fatal("install must abort when cosign verify fails for a signed OCI source, even with AllowUnsigned=true")
+	}
+	if uds.deployed != "" {
+		t.Errorf("AllowUnsigned must NOT reach uds deploy when the signed source fails verify; got deployed=%q", uds.deployed)
+	}
+	recs, _ := (appcatalog.State{Kube: kube}).Load()
+	if _, ok := recs["cosmos"]; ok {
+		t.Error("no state record should be written when verify fails (fail-closed)")
+	}
+}
+
+// TestRunAppInstall_PreflightErrorDoesNotAbort pins decision #1: preflight is
+// advisory. An Inspect I/O failure from the Inspector (preflight) must be logged
+// but never abort the install — deploy and record must still succeed.
+func TestRunAppInstall_PreflightErrorDoesNotAbort(t *testing.T) {
+	kube := &fakeKube{}
+	uds := &fakeUDS{}
+
+	// Zarf (OCI resolver) succeeds so we get a digest-pinned ref; Cosign passes.
+	zarfOK := fakeInspect{out: []byte(inspectWithCRAndDigest)}
+	// Inspect (preflight) fails — simulates a transient I/O error in the inspector.
+	inspectFail := fakeInspect{err: errors.New("inspect failed")}
+
+	d := appDeps{
+		Cat:     testCatalog(),
+		Cosign:  fakeCosign{},
+		UDS:     uds,
+		Inspect: inspectFail,
+		State:   appcatalog.State{Kube: kube},
+		Zarf:    zarfOK,
+		Now:     func() string { return "2026-06-26T00:00:00Z" },
+		Actor:   "tester",
+	}
+
+	var out bytes.Buffer
+	if err := runAppInstall(&out, d, "cosmos"); err != nil {
+		t.Fatalf("preflight error is advisory — install must NOT abort, got: %v", err)
+	}
+	if uds.deployed == "" {
+		t.Error("deploy must proceed even when preflight Inspect fails")
+	}
+	recs, _ := (appcatalog.State{Kube: kube}).Load()
+	if recs["cosmos"].Version != "2.102.0" {
+		t.Errorf("state record must be written after a successful deploy, got: %+v", recs["cosmos"])
 	}
 }
