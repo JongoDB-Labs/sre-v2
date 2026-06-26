@@ -30,13 +30,14 @@ packages:
     ref: 1.7.0-upstream
 
   # Platform data-service OPERATORS — mission apps create their OWN instances
-  # (PostgresCluster CRs, MinIO buckets) against these shared operators.
-  # TODO(migration): author these Zarf packages under packages/.
-  # - name: pgo
-  #   path: ../packages/pgo
-  #   ref: "5.7"
-  # - name: minio-operator
-  #   path: ../packages/minio-operator
+  # (PostgresCluster CRs, buckets) against these shared operators.
+  - name: pgo
+    path: ../packages/pgo
+    ref: "6.0.2"
+  # MinIO object-store — decision pending (operator vs shared instance); see
+  # packages/README.md. TODO: author packages/minio + add it here.
+  # - name: minio
+  #   path: ../packages/minio
   #   ref: "..."
 
   # NOTE: cosmos (and every other mission app) is NOT in this bundle — apps are

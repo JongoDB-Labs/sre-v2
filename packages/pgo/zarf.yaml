@@ -1,0 +1,30 @@
+# CrunchyData Postgres Operator (PGO) — an SRE shared data-service.
+#
+# Cluster-wide: any mission app creates a `PostgresCluster` CR in its OWN namespace
+# and PGO reconciles it into an isolated Postgres (pgvector) + pgBackRest backups.
+# Shared operator, isolated per-app databases — the substrate's database service.
+#
+# Bundled by ../../bundle/uds-bundle.yaml. Standalone build/deploy:
+#   zarf package create packages/pgo && zarf package deploy zarf-package-pgo-*.tar.zst
+kind: ZarfPackageConfig
+metadata:
+  name: pgo
+  version: "6.0.2"
+  description: "CrunchyData PGO — SRE Postgres data-service (apps create PostgresCluster CRs)"
+
+components:
+  - name: pgo
+    required: true
+    description: "PGO operator (cluster-wide) + the postgres/pgBackRest images apps' clusters pull"
+    charts:
+      - name: pgo
+        url: oci://registry.developers.crunchydata.com/crunchydata/pgo
+        version: 6.0.2
+        namespace: postgres-operator
+    images:
+      - registry.developers.crunchydata.com/crunchydata/postgres-operator:ubi9-6.0.2-0
+      # Postgres-instance images apps' PostgresClusters pull — the substrate carries
+      # them so mission apps don't bundle them (pgvector ships inside crunchy-postgres,
+      # matching the defcon prod line):
+      - registry.developers.crunchydata.com/crunchydata/crunchy-postgres:ubi9-16.14-2621
+      - registry.developers.crunchydata.com/crunchydata/crunchy-pgbackrest:ubi9-2.58.0-2621
