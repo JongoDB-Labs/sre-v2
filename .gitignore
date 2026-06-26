@@ -22,3 +22,4 @@ values.overlay.yaml
 # OS / editor
 .DS_Store
 *.swp
+installer/srectl

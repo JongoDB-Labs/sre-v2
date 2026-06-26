@@ -1,0 +1,18 @@
+# SRE mission-app catalog — the apps `srectl app install` can deploy onto a
+# running substrate. Each entry is a signed UDS bundle resolved by its source
+# adapter, verified against the declared keyless signer identity (fail-closed),
+# then `uds deploy`ed so the UDS Operator auto-wires cohesion.
+#
+# cosmos is the reference app and entry #1 (the app-onboarding contract incarnate).
+apiVersion: sre/v1
+apps:
+  - name: cosmos
+    version: "2.102.0"
+    description: "COSMOS — mission app (PM/CRM/Lead Tracker over the shared substrate)."
+    source:
+      type: oci
+      ref: ghcr.io/jongodb-labs/bundles/cosmos
+    verify:
+      identityRegexp: "^https://github.com/JongoDB-Labs/cosmos-v2/"
+      issuer: "https://token.actions.githubusercontent.com"
+    requires: [pgo]
