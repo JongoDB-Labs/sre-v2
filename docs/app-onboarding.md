@@ -59,6 +59,16 @@ the exact seed recipe live in cosmos-v2 `src/lib/auth/sso.ts` + `docs/sso-accept
 > **Cohesion takeaway:** the *substrate* owns the IdP; each app only registers a
 > client + its own OIDC config. Swap the realm once → every app's SSO follows.
 
+**Two real caveats (from wiring cosmos live):**
+- **Egress.** A *native* OIDC app reaches Keycloak directly for discovery + token —
+  but UDS does **not** auto-add that egress when it creates the SSO client. Add an
+  egress `allow` to the app's `Package` (lab demo used `remoteGenerated: Anywhere`;
+  tighten to the tenant gateway). Without it, the call to `sso.uds.dev` resolves
+  (Istio ambient synthetic IP) but is **RST'd by ztunnel** under default-deny.
+- **Vault key.** cosmos seals the IdP client secret with AES-256, so the app's
+  `SSO_VAULT_KEY` must decode to **exactly 32 bytes** — generate with
+  `openssl rand -base64 32` (a 48-byte key fails only when SSO is first used).
+
 ## 3 · Data — shared operators, own instances
 
 The app declares its **own** isolated data against the substrate's shared operators
