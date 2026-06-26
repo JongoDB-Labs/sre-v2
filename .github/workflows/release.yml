@@ -1,0 +1,220 @@
+# Signed UDS-bundle delivery → GHCR — the SUBSTRATE analog of cosmos-v2's
+# chart-signing CI (cosmos-v2/.github/workflows/release.yml, `chart` job).
+#
+# This builds the SRE Secure Runtime Environment bundle (bundle/uds-bundle.yaml:
+# kind UDSBundle, name `sre`, version 1.7.0 — init + the 4 UDS Core layers + the
+# PGO/MinIO operator packages) into a single OCI artifact, publishes it to GHCR,
+# and gives it the SAME gov-grade supply-chain treatment as the cosmos image and
+# chart: pushed to GHCR, then signed keyless (OIDC → public Fulcio/Rekor) ALWAYS,
+# signed with a KMS/HSM key ADDITIONALLY when secrets.COSIGN_KEY is set (in-boundary
+# gov verification where public Rekor is unreachable), a SLSA build-provenance
+# attestation bound to the bundle digest, and a verify-after-sign GATE that fails
+# the release if the signature did not actually land. Tag→digest→signature is
+# unbroken, so a downstream airgap install can verify the substrate offline.
+#
+# A UDS bundle publishes as an OCI artifact, so `cosign sign <ref>@<digest>` works
+# by digest exactly as it does for the cosmos OCI Helm chart — same keyless flow,
+# same verify identity (workflow OIDC cert + GitHub Actions issuer).
+#
+# 800-171 control mapping (mirrors cosmos-v2 release.yml / security.yml):
+#   Sign + provenance  → 800-171 3.4.x / 3.14.x  (integrity, supply chain)
+#   SHA-pinned actions → 800-171 3.1.1 / 3.4.x    (least-privilege, config)
+#
+# All `uses:` are pinned to a commit SHA (human-readable version in the trailing
+# comment). The cosmos-v2 security.yml config-assertions gate FAILS the build on
+# any unpinned @vN/@main ref in .github/**, so when an equivalent gate lands here
+# this file must already be fully pinned — which it is. The action SHAs below are
+# the IDENTICAL ones cosmos-v2 uses (checkout, buildx, login, cosign-installer,
+# attest-build-provenance); setup-uds is the one substrate-specific addition,
+# pinned to v1.0.1's commit SHA.
+name: release
+
+# Build + sign run ONLY on a deliberate version tag (matching cosmos-v2). Cut a
+# release by tagging `vX.Y.Z`. The bundle version itself is the one in
+# bundle/uds-bundle.yaml (metadata.version, currently 1.7.0 — it tracks the UDS
+# Core line); the git tag gates WHEN we publish, the bundle metadata sets WHAT
+# version the artifact carries. workflow_dispatch allows a manual re-publish.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  # BUNDLE_NS (the GHCR namespace the bundle publishes UNDER) is derived per-job in
+  # the "Normalize bundle refs" step: GHCR paths MUST be lowercase, but the org
+  # owner `JongoDB-Labs` is mixed-case. `uds publish <tarball> oci://<ns>` appends
+  # the bundle's own name+version, so the final ref is <ns>/sre:<bundle-version>.
+
+jobs:
+  # ── Build, publish, sign + attest the SRE UDS bundle ────────────────────────
+  bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Expose whether COSIGN_KEY is configured as a JOB-level env so the KMS signing
+    # step can gate on it in a step `if:` — actionlint disallows referencing the
+    # secrets context directly in a step-level `if` (same pattern as cosmos-v2).
+    env:
+      HAS_KMS: ${{ secrets.COSIGN_KEY != '' }}
+    permissions:
+      contents: read
+      packages: write # push the OCI bundle (+ its .sig / attestation) to GHCR
+      id-token: write # keyless cosign (OIDC → Fulcio) + SLSA provenance attestation
+      attestations: write # actions/attest-build-provenance
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # Read the bundle name + version straight from the source of truth so the
+      # published ref and every cosign/attest subject below stay in lock-step with
+      # bundle/uds-bundle.yaml (no hand-maintained duplicate). GitHub's ubuntu
+      # runners ship mikefarah yq v4.
+      - name: Derive bundle name + version from uds-bundle.yaml
+        id: bundle
+        run: |
+          set -euo pipefail
+          command -v yq >/dev/null || { echo "::error::yq not on runner (GitHub ubuntu images ship mikefarah yq v4)"; exit 1; }
+          NAME="$(yq -r '.metadata.name' bundle/uds-bundle.yaml)"
+          VERSION="$(yq -r '.metadata.version' bundle/uds-bundle.yaml)"
+          {
+            echo "name=$NAME"
+            echo "version=$VERSION"
+          } >> "$GITHUB_OUTPUT"
+          echo "Building UDS bundle '$NAME' v$VERSION"
+
+      # GHCR namespaces must be lowercase; the owner `JongoDB-Labs` is mixed-case.
+      # The bundle publishes UNDER this namespace and uds appends `<name>:<version>`,
+      # so the final artifact ref is `$BUNDLE_NS/<name>:<version>`. We compute that
+      # full ref here for the sign/attest/verify steps to consume.
+      - name: Normalize bundle refs (lowercase owner)
+        env:
+          NAME: ${{ steps.bundle.outputs.name }}
+          VERSION: ${{ steps.bundle.outputs.version }}
+        run: |
+          set -euo pipefail
+          OWNER="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
+          {
+            echo "BUNDLE_NS=ghcr.io/$OWNER/bundles"
+            echo "BUNDLE_REF=ghcr.io/$OWNER/bundles/$NAME:$VERSION"
+          } >> "$GITHUB_ENV"
+
+      # buildx gives us `docker buildx imagetools inspect`, which resolves the
+      # published OCI artifact's manifest digest (UDS bundles are OCI artifacts) so
+      # cosign can sign + verify BY DIGEST — the same digest-resolution mechanism
+      # the cosmos-v2 chart job uses, no extra tool to pin.
+      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      # One GHCR login serves all of: `uds publish` (oras under the hood), cosign,
+      # and buildx imagetools — they all read ~/.docker/config.json.
+      - name: Log in to GHCR
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Install the `uds` CLI via the official Defense Unicorns action, pinned to
+      # v1.0.1's commit SHA. `version` pins the CLI binary itself (kept in step with
+      # the uds version the substrate's docs/runbook target).
+      - name: Install uds CLI
+        uses: defenseunicorns/setup-uds@ab842abcad1f7a3305c2538e3dd1950d0daacfa5 # v1.0.1
+        with:
+          version: v0.33.0
+
+      # Build the bundle tarball from bundle/uds-bundle.yaml. `uds create <dir>`
+      # reads the bundle dir, pulls every referenced package — init + the 4 UDS Core
+      # layers from ghcr.io/defenseunicorns/packages/* AND the local pgo/minio Zarf
+      # packages (which themselves pull Crunchy/Quay/min.io images) — and writes a
+      # single uds-bundle-sre-<arch>-<version>.tar.zst. --confirm is non-interactive
+      # for CI; -a amd64 pins the arch (the operators here are amd64 lab images).
+      - name: Build SRE bundle (uds create)
+        id: create
+        run: |
+          set -euo pipefail
+          uds create bundle --confirm --architecture amd64 -o /tmp/bundle-out
+          TARBALL="$(ls /tmp/bundle-out/uds-bundle-${{ steps.bundle.outputs.name }}-amd64-${{ steps.bundle.outputs.version }}.tar.zst)"
+          [ -f "$TARBALL" ] || { echo "::error::expected bundle tarball not found in /tmp/bundle-out"; exit 1; }
+          echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
+          echo "Built $TARBALL"
+
+      # Publish the tarball to GHCR. `uds publish <tarball> oci://<namespace>`
+      # appends the bundle's own name+version, producing $BUNDLE_REF
+      # (= $BUNDLE_NS/<name>:<version>). This is the artifact everything below signs.
+      - name: Publish SRE bundle to GHCR (uds publish)
+        run: |
+          set -euo pipefail
+          uds publish "${{ steps.create.outputs.tarball }}" "oci://$BUNDLE_NS"
+          echo "Published $BUNDLE_REF"
+
+      # Resolve the published bundle's manifest digest so sign/attest/verify all
+      # operate BY DIGEST (immutable), not by the mutable tag — identical posture to
+      # the cosmos image+chart jobs.
+      - name: Resolve published bundle digest
+        id: digest
+        run: |
+          set -euo pipefail
+          DIGEST="$(docker buildx imagetools inspect "$BUNDLE_REF" --format '{{.Manifest.Digest}}')"
+          [ -n "$DIGEST" ] || { echo "::error::could not resolve digest for $BUNDLE_REF"; exit 1; }
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "$BUNDLE_REF → $DIGEST"
+
+      # ── Sign + provenance ────────────────────────────────────────────────
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      # Keyless signing runs ALWAYS: OIDC → an ephemeral Fulcio cert bound to THIS
+      # workflow's identity, with the signing event recorded in the public Rekor
+      # transparency log (the external WORM anchor). No long-lived key to guard.
+      - name: cosign sign bundle (keyless — always)
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: cosign sign --yes "${BUNDLE_REF%%:*}@${{ steps.digest.outputs.digest }}"
+
+      # KMS signing runs ADDITIONALLY when COSIGN_KEY is configured (an in-boundary
+      # KMS/HSM ref: awskms://…, gcpkms://…), so gov verifiers can trust the KMS
+      # cert without reaching public Rekor. Same digest, second signature.
+      - name: cosign sign bundle (KMS — when COSIGN_KEY configured)
+        if: ${{ env.HAS_KMS == 'true' }}
+        env:
+          COSIGN_KEY: ${{ secrets.COSIGN_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: cosign sign --yes --key "env://COSIGN_KEY" "${BUNDLE_REF%%:*}@${{ steps.digest.outputs.digest }}"
+
+      # SLSA build-provenance attestation bound to the bundle's manifest digest, so
+      # consumers can verify WHERE/HOW the substrate bundle was built.
+      - name: Attest bundle provenance (SLSA)
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-name: ${{ env.BUNDLE_NS }}/${{ steps.bundle.outputs.name }}
+          subject-digest: ${{ steps.digest.outputs.digest }}
+          push-to-registry: true
+
+      # Verify-after-sign GATE (self-healing) — re-resolve the published tag's digest
+      # and confirm the keyless signature is actually present + verifiable against
+      # THIS workflow's identity. If it didn't persist, re-sign and retry; FAIL the
+      # release if it can't be made verifiable. A green-but-unsigned bundle is
+      # impossible — same contract as the cosmos image+chart gates.
+      - name: Verify bundle signature landed (gate)
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          id_regexp="^https://github.com/${REPO}/"
+          issuer="https://token.actions.githubusercontent.com"
+          ref_no_tag="${BUNDLE_REF%%:*}"
+          for attempt in 1 2 3; do
+            digest="$(docker buildx imagetools inspect "$BUNDLE_REF" --format '{{.Manifest.Digest}}')"
+            if cosign verify --certificate-identity-regexp "$id_regexp" \
+                 --certificate-oidc-issuer "$issuer" "$ref_no_tag@$digest" >/dev/null 2>&1; then
+              echo "bundle signature verified: $ref_no_tag@$digest"
+              exit 0
+            fi
+            echo "::warning::no verifiable signature for $ref_no_tag@$digest (attempt $attempt) — re-signing"
+            cosign sign --yes "$ref_no_tag@$digest" || true
+            sleep "$((attempt * 5))"
+          done
+          echo "::error::$BUNDLE_REF has no verifiable signature after retries"
+          exit 1
