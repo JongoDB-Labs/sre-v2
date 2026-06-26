@@ -69,6 +69,28 @@ the exact seed recipe live in cosmos-v2 `src/lib/auth/sso.ts` + `docs/sso-accept
   `SSO_VAULT_KEY` must decode to **exactly 32 bytes** — generate with
   `openssl rand -base64 32` (a 48-byte key fails only when SSO is first used).
 
+**Bootstrapping a login user (testing).** UDS Core ships **no standing Keycloak
+admin** by design — you bootstrap one on demand and remove it after, so no permanent
+superuser sits in the cluster ([UDS docs](https://docs.defenseunicorns.com/core/how-to-guides/identity--authorization/manage-admin-access/)).
+Minting admin creds is **gated from automation** — it's an operator action (or a
+sanctioned `uds zarf connect keycloak` → Welcome Page). To seed a test user:
+```bash
+KCPOD=$(kubectl -n keycloak get pod -l app.kubernetes.io/name=keycloak -o name | head -1)
+TMPPW=$(openssl rand -base64 18)
+kubectl -n keycloak exec "$KCPOD" -- env KCBOOT_PW="$TMPPW" bash -lc \
+  '/opt/keycloak/bin/kc.sh bootstrap-admin user --username tmpbootstrap --password:env KCBOOT_PW'
+kubectl -n keycloak exec "$KCPOD" -- env KCBOOT_PW="$TMPPW" bash -lc '
+  K=/opt/keycloak/bin/kcadm.sh
+  $K config credentials --server http://localhost:8080 --realm master --user tmpbootstrap --password "$KCBOOT_PW"
+  $K create users -r uds -s username=ssotest -s email=ssotest@acme.test -s emailVerified=true -s enabled=true
+  $K set-password -r uds --username ssotest --new-password "<pw>"
+  TID=$($K get users -r master -q username=tmpbootstrap --fields id | grep -oE "[a-f0-9-]{36}" | head -1)
+  [ -n "$TID" ] && $K delete users/$TID -r master   # remove the temp admin'
+```
+> This toil is exactly what the **installer/Day-2 wizard must absorb** (`srectl` seeds
+> the platform admin + users/service-creds). Also confirm the realm permits password
+> login — the `uds` realm carries a `DENY_USERNAME_PASSWORD` hardening flag.
+
 ## 3 · Data — shared operators, own instances
 
 The app declares its **own** isolated data against the substrate's shared operators
