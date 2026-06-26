@@ -34,11 +34,12 @@ packages:
   - name: pgo
     path: ../packages/pgo
     ref: "6.0.2"
-  # MinIO object-store — decision pending (operator vs shared instance); see
-  # packages/README.md. TODO: author packages/minio + add it here.
-  # - name: minio
-  #   path: ../packages/minio
-  #   ref: "..."
+  # MinIO Operator object-store — apps create their own Tenant CRs (incl. WORM
+  # buckets) against it; see packages/minio. Lab/baseline only — prod/DoD uses
+  # external FIPS S3.
+  - name: minio
+    path: ../packages/minio
+    ref: "7.1.1"
 
   # NOTE: cosmos (and every other mission app) is NOT in this bundle — apps are
   # deployed onto a running SRE in round 2, not baked into the substrate.
