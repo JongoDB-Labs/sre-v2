@@ -21,6 +21,13 @@ vs airgap) → **posture** (Baseline | DoD-hardened) → **sizing** (small | med
 **secrets** (SOPS age key) → **review** (renders `uds-config.yaml` + values overlay) →
 **deploy** (orchestrates the tools — never reimplements them).
 
+> **Identity provisioning (roadmap).** The wizard owns not just *config* but the
+> platform's initial **accounts + service credentials** — seed Keycloak (the platform
+> admin + realm users / service accounts) and hand each chosen service the creds it
+> needs, so an operator never hand-creates users in a downstream console. Re-entrant
+> for Day-2 (add a user / rotate a cred later). *(captured during live SSO testing —
+> minting a Keycloak login user should be a wizard step, not a manual `kcadm`.)*
+
 Renders two files (re-runnable, git-committable): `uds-config.yaml` (bundle variables)
 \+ `values.overlay.yaml` (sizing + posture). `--from answers.yaml` replays headless.
 
