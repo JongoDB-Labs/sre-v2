@@ -35,4 +35,19 @@ UDS Package that auto-wires into ingress/SSO/monitor via its CR. See `docs/specs
 2. **orchestration** — wire deploy (host-prep → RKE2 → SRE bundle) + the Day-2 state-read
 3. **app-catalog** — round-2 deploy layer (cosmos as the first, reference app)
 
+## Usage (skeleton — step 1 done)
+
+```bash
+cd installer && go build -o srectl ./cmd/srectl
+
+./srectl preflight     # host checks: arch · vCPU/RAM/disk · kernel ≥5.8 · swap · /dev/kmsg · connectivity
+./srectl install       # interactive TUI: preflight → posture → sizing → services → SSO → secrets → review → deploy*
+./srectl install --from examples/answers.yaml --non-interactive --dry-run --out ./out   # headless render
+```
+`--dry-run` / `--from` render two re-runnable, git-committable files — `uds-config.yaml`
+(UDS bundle variables) + `values.overlay.yaml` (sizing + posture Helm values). *Deploy is
+**stubbed** in the skeleton (prints the `uds deploy …` it would run); wired in step 2.
+
+Layout: `cmd/srectl/` (cobra) · `internal/{preflight,catalog,config,render,tui}` · `examples/answers.yaml`.
+
 Full design: `docs/specs/SP7-install-wizard.md` (migrating from the planning repo).

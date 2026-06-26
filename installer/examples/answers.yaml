@@ -1,0 +1,14 @@
+# Example srectl answer file — replay with:
+#   srectl install --from examples/answers.yaml --non-interactive --dry-run
+# A DoD-hardened, full-Core medium deployment with external OIDC.
+posture: DoD
+sizing: Medium
+services:
+  - core-identity-authorization
+  - core-runtime-security
+  - core-monitoring
+sso: ExternalOIDC
+oidcIssuer: https://login.example.mil/realms/sre
+domain: sre.example.mil
+secrets: SOPSAge
+agePublicKey: age1examplexqqqpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqs0abcde
