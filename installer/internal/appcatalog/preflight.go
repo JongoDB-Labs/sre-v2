@@ -8,6 +8,7 @@ import (
 // packageCRRe detects a UDS Package CR in zarf inspect output. Its presence means
 // the UDS Operator will auto-wire cohesion (expose/sso/allow) on deploy; absence
 // means the app will deploy but not self-wire — worth a warning, not a block.
+// NOTE: this regex assumes zarf inspect's YAML output; it would miss a future --output json format.
 var packageCRRe = regexp.MustCompile(`(?m)^\s*kind:\s*Package\b`)
 
 // Warning is one advisory preflight finding. Preflight is advisory (spec §5.3):
@@ -31,6 +32,12 @@ type Inspector interface {
 // be inspected at all (an I/O problem the caller should surface); cohesion and
 // requires gaps are warnings, because the deploy proceeds (the post-deploy confirm
 // in step 6 is authoritative).
+//
+// Advisory error contract: the returned error is advisory — it signals only that
+// the cohesion scan could not run (e.g. a zarf Inspect I/O failure). Per spec §5.3,
+// the install MUST proceed even if preflight cannot scan. Callers SHOULD log this
+// error but MUST NOT abort the install on it. Genuine cohesion / requires gaps are
+// surfaced as Warnings, never as errors.
 func Preflight(z Inspector, e Entry, ref string, installedRequires map[string]bool) ([]Warning, error) {
 	out, err := z.Inspect(ref)
 	if err != nil {

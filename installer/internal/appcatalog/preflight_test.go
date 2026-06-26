@@ -42,9 +42,10 @@ func TestPreflight_WarnsOnMissingPackageCR(t *testing.T) {
 }
 
 func TestPreflight_WarnsOnMissingRequire(t *testing.T) {
+	// service id from the substrate catalog, e.g. "pgo" not "postgres"
 	warns, err := Preflight(&fakeInspector{out: []byte(manifestWithCR)},
-		Entry{Name: "cosmos", Requires: []string{"postgres"}}, "ref",
-		map[string]bool{}) // postgres NOT installed
+		Entry{Name: "cosmos", Requires: []string{"pgo"}}, "ref",
+		map[string]bool{}) // pgo NOT installed
 	if err != nil {
 		t.Fatalf("Preflight: %v", err)
 	}
@@ -54,9 +55,10 @@ func TestPreflight_WarnsOnMissingRequire(t *testing.T) {
 }
 
 func TestPreflight_CleanWhenCohesionPresent(t *testing.T) {
+	// service id from the substrate catalog, e.g. "pgo" not "postgres"
 	warns, err := Preflight(&fakeInspector{out: []byte(manifestWithCR)},
-		Entry{Name: "cosmos", Requires: []string{"postgres"}}, "ref",
-		map[string]bool{"postgres": true})
+		Entry{Name: "cosmos", Requires: []string{"pgo"}}, "ref",
+		map[string]bool{"pgo": true})
 	if err != nil {
 		t.Fatalf("Preflight: %v", err)
 	}
