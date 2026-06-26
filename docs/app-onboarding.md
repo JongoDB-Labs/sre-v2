@@ -130,7 +130,7 @@ the unit suite (`go test ./...`) already covers the logic with fakes.
 
 Preconditions:
 - The substrate is up and `kubectl get nodes` is Ready.
-- PGO is installed (cosmos `requires: [postgres]`); else expect the advisory
+- PGO is installed (cosmos `requires: [pgo]`); else expect the advisory
   `missing-require` warning and a degraded cosmos.
 - `catalog.yaml` (repo root) lists cosmos as entry #1.
 

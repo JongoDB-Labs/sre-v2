@@ -26,4 +26,7 @@ func TestShippedCatalog_CosmosIsEntryOne(t *testing.T) {
 	if cosmos.Verify.IdentityRegexp == "" || cosmos.Verify.Issuer == "" {
 		t.Errorf("cosmos must declare an expected signer identity (fail-closed), got %+v", cosmos.Verify)
 	}
+	if len(cosmos.Requires) != 1 || cosmos.Requires[0] != "pgo" {
+		t.Errorf("cosmos must require the substrate service-id pgo (decision #5), got %v", cosmos.Requires)
+	}
 }

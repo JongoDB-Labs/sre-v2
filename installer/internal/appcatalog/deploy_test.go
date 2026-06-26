@@ -50,6 +50,23 @@ func TestDeploy_RollsBackOnFailure(t *testing.T) {
 	}
 }
 
+func TestDeploy_RollbackFailureDoesNotMaskDeployError(t *testing.T) {
+	fu := &fakeUDS{
+		deployErr: errors.New("reconcile timeout"),
+		removeErr: errors.New("package not found"),
+	}
+	err := Deploy(fu, "ghcr.io/x/cosmos@sha256:abc", "cosmos")
+	if err == nil {
+		t.Fatal("Deploy should return an error when deploy fails")
+	}
+	if !strings.Contains(err.Error(), "reconcile timeout") {
+		t.Errorf("returned error must contain the deploy failure, got %v", err)
+	}
+	if strings.Contains(err.Error(), "package not found") {
+		t.Errorf("rollback failure must not mask the deploy error, got %v", err)
+	}
+}
+
 func TestRemove_Wraps(t *testing.T) {
 	fu := &fakeUDS{}
 	if err := Remove(fu, "cosmos"); err != nil {
