@@ -41,3 +41,21 @@ func TestParseVector_Error(t *testing.T) {
 		t.Fatal("expected an error for a non-success status")
 	}
 }
+
+const svcListJSON = `{"items":[
+ {"metadata":{"name":"kube-prometheus-stack-alertmanager","namespace":"monitoring"},"spec":{"ports":[{"port":9093}]}},
+ {"metadata":{"name":"kube-prometheus-stack-prometheus","namespace":"monitoring"},"spec":{"ports":[{"port":9090},{"port":8080}]}},
+ {"metadata":{"name":"kube-prometheus-stack-operator","namespace":"monitoring"},"spec":{"ports":[{"port":443}]}}]}`
+
+func TestDiscoverPromRef(t *testing.T) {
+	got, err := DiscoverPromRef([]byte(svcListJSON))
+	if err != nil || got != "monitoring/kube-prometheus-stack-prometheus:9090" {
+		t.Fatalf("DiscoverPromRef = %q, %v", got, err)
+	}
+}
+
+func TestDiscoverPromRef_NotFound(t *testing.T) {
+	if _, err := DiscoverPromRef([]byte(`{"items":[]}`)); err == nil {
+		t.Fatal("expected error when no prometheus service exists")
+	}
+}

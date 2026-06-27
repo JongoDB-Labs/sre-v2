@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 // Sample is one instant (vector) result: its labels and parsed float value.
@@ -94,4 +95,49 @@ func ParseMatrix(raw []byte) ([]Series, error) {
 		out = append(out, Series{Labels: item.Metric, Values: vals})
 	}
 	return out, nil
+}
+
+// DiscoverPromRef finds the Prometheus service in a `kubectl get svc -n monitoring
+// -o json` payload and returns "<ns>/<name>:9090". It skips the alertmanager,
+// operator, node-exporter, and kube-state-metrics services.
+func DiscoverPromRef(svcListJSON []byte) (string, error) {
+	var list struct {
+		Items []struct {
+			Metadata struct {
+				Name      string `json:"name"`
+				Namespace string `json:"namespace"`
+			} `json:"metadata"`
+			Spec struct {
+				Ports []struct {
+					Port int `json:"port"`
+				} `json:"ports"`
+			} `json:"spec"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(svcListJSON, &list); err != nil {
+		return "", fmt.Errorf("prom: parse svc list: %w", err)
+	}
+	skip := []string{"alertmanager", "operator", "node-exporter", "kube-state"}
+	for _, it := range list.Items {
+		name := it.Metadata.Name
+		if !strings.Contains(name, "prometheus") {
+			continue
+		}
+		skipped := false
+		for _, s := range skip {
+			if strings.Contains(name, s) {
+				skipped = true
+				break
+			}
+		}
+		if skipped {
+			continue
+		}
+		for _, p := range it.Spec.Ports {
+			if p.Port == 9090 {
+				return fmt.Sprintf("%s/%s:9090", it.Metadata.Namespace, name), nil
+			}
+		}
+	}
+	return "", fmt.Errorf("prom: no prometheus service (port 9090) found in svc list")
 }
