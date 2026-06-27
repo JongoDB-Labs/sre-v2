@@ -6,6 +6,7 @@
 //
 //	srectl preflight   run host readiness checks and print a table
 //	srectl install     launch the wizard (or replay answers.yaml) and render config
+//	srectl monitor     open the live k9s-style console of the substrate
 //	srectl version     print version information
 package main
 
@@ -30,6 +31,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(
 		newPreflightCmd(),
 		newInstallCmd(),
+		newMonitorCmd(),
 		newAppCmd(),
 		newVersionCmd(),
 	)
