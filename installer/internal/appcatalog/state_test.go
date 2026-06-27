@@ -16,6 +16,7 @@ type fakeKube struct {
 	applied      map[string]string
 	packagesJSON []byte
 	listErr      error
+	context      string
 }
 
 func (f *fakeKube) EnsureNamespace(ns string) error { f.nsEnsured = ns; return nil }
@@ -35,6 +36,8 @@ func (f *fakeKube) ApplyConfigMap(ns, name string, data map[string]string) error
 }
 
 func (f *fakeKube) ListPackages() ([]byte, error) { return f.packagesJSON, f.listErr }
+
+func (f *fakeKube) CurrentContext() (string, error) { return f.context, nil }
 
 func TestState_PutThenLoad(t *testing.T) {
 	fk := &fakeKube{cmMissing: true}
@@ -152,4 +155,12 @@ func marshalConfigMapForTest(data map[string]string) []byte {
 		panic(err)
 	}
 	return b
+}
+
+func TestFakeKube_CurrentContext(t *testing.T) {
+	fk := &fakeKube{context: "lab-rke2"}
+	got, err := fk.CurrentContext()
+	if err != nil || got != "lab-rke2" {
+		t.Fatalf("CurrentContext = %q, %v; want \"lab-rke2\", nil", got, err)
+	}
 }

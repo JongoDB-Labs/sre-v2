@@ -58,6 +58,7 @@ func (f *fakeKube) ListPackages() ([]byte, error) {
 	}
 	return f.packagesJSON, nil
 }
+func (f *fakeKube) CurrentContext() (string, error) { return "test-context", nil }
 
 func marshalCMForTest(data map[string]string) []byte {
 	b, err := yaml.Marshal(data)
