@@ -10,11 +10,15 @@ import (
 	"github.com/rivo/tview"
 )
 
-// page is one wizard screen: a name, a builder, and an optional predicate that
-// decides whether the screen is shown for the current answers.
+// dialogWidth is the fixed width of every wizard dialog (centered on the backdrop).
+const dialogWidth = 78
+
+// page is one wizard screen: a name, a builder, the dialog height it needs, and
+// an optional predicate that decides whether the screen is shown.
 type page struct {
 	name    string
 	build   func() tview.Primitive
+	height  int
 	visible func() bool // nil ⇒ always visible
 }
 
@@ -31,44 +35,58 @@ func Run(cat *catalog.Catalog, version string) (*config.Answers, error) {
 
 	// Screen builders, in flow order. Conditional screens carry a predicate.
 	w.order = []page{
-		{name: "welcome", build: func() tview.Primitive {
+		{name: "welcome", height: 22, build: func() tview.Primitive {
 			return welcomeScreen(w.next, w.quit)
 		}},
-		{name: "posture", build: func() tview.Primitive {
-			return radioScreen("Posture — security profile", postureOptions, flow.Answers().Posture,
+		{name: "posture", height: 13, build: func() tview.Primitive {
+			intro := "Security and image profile for the substrate.\n" +
+				"[#485260]Sets the image source (upstream vs Iron Bank), FIPS, and netpol.[-]"
+			return radioScreen(intro, postureOptions, flow.Answers().Posture,
 				func(v config.Posture) { flow.SetPosture(v); w.next() })
 		}},
-		{name: "sizing", build: func() tview.Primitive {
-			return radioScreen("Sizing — resource envelope", sizingOptions, flow.Answers().Sizing,
+		{name: "sizing", height: 15, build: func() tview.Primitive {
+			intro := "Resource envelope the substrate is shaped for.\n" +
+				"[#485260]Sets replicas, requests/limits, and Postgres sizing.[-]"
+			return radioScreen(intro, sizingOptions, flow.Answers().Sizing,
 				func(v config.Sizing) { flow.SetSizing(v); w.next() })
 		}},
-		{name: "domain", build: func() tview.Primitive {
-			return inputScreen("Base domain", flow.Answers().Domain, "uds.dev",
+		{name: "domain", height: 12, build: func() tview.Primitive {
+			intro := "The DNS base domain your services are published under.\n" +
+				"[#485260]e.g. uds.dev → cosmos.uds.dev, sso.uds.dev[-]"
+			return inputScreen(intro, "Base domain", flow.Answers().Domain, "uds.dev", 36,
 				flow.SetDomain, w.next, w.prev)
 		}},
-		{name: "services", build: func() tview.Primitive {
+		{name: "services", height: 20, build: func() tview.Primitive {
 			return checklistScreen(flow, w.next, w.prev)
 		}},
-		{name: "sso", build: func() tview.Primitive {
-			return radioScreen("SSO — identity provider", ssoOptions, flow.Answers().SSO,
+		{name: "sso", height: 15, build: func() tview.Primitive {
+			intro := "How operators and app users sign in.\n" +
+				"[#485260]Keycloak is the bundled IdP every app shares.[-]"
+			return radioScreen(intro, ssoOptions, flow.Answers().SSO,
 				func(v config.SSOMode) { flow.SetSSO(v); w.next() })
 		}},
-		{name: "oidc", visible: flow.NeedsOIDCIssuer, build: func() tview.Primitive {
-			return inputScreen("OIDC issuer URL", flow.Answers().OIDCIssuer, "https://idp.example/realms/x",
-				flow.SetOIDCIssuer, w.next, w.prev)
+		{name: "oidc", height: 12, visible: flow.NeedsOIDCIssuer, build: func() tview.Primitive {
+			intro := "Your existing OpenID Connect issuer (realm) URL.\n" +
+				"[#485260]Used because you chose External OIDC.[-]"
+			return inputScreen(intro, "OIDC issuer URL", flow.Answers().OIDCIssuer,
+				"https://idp.example/realms/x", 48, flow.SetOIDCIssuer, w.next, w.prev)
 		}},
-		{name: "secrets", build: func() tview.Primitive {
-			return radioScreen("Secrets — management mode", secretsOptions, flow.Answers().Secrets,
+		{name: "secrets", height: 13, build: func() tview.Primitive {
+			intro := "How cluster secrets are encrypted at rest.\n" +
+				"[#485260]SOPS age keeps them in git, encrypted; Flux decrypts in-cluster.[-]"
+			return radioScreen(intro, secretsOptions, flow.Answers().Secrets,
 				func(v config.SecretsMode) { flow.SetSecrets(v); w.next() })
 		}},
-		{name: "agekey", visible: flow.NeedsAgeKey, build: func() tview.Primitive {
-			return inputScreen("SOPS age recipient (public)", flow.Answers().AgePublicKey, "age1...",
-				flow.SetAgePublicKey, w.next, w.prev)
+		{name: "agekey", height: 12, visible: flow.NeedsAgeKey, build: func() tview.Primitive {
+			intro := "The age public key (recipient) secrets are encrypted to.\n" +
+				"[#485260]Generate one with: age-keygen -o key.txt[-]"
+			return inputScreen(intro, "Age recipient", flow.Answers().AgePublicKey,
+				"age1...", 52, flow.SetAgePublicKey, w.next, w.prev)
 		}},
-		{name: "review", build: func() tview.Primitive {
+		{name: "review", height: 20, build: func() tview.Primitive {
 			return reviewScreen(flow, cat, w.next, w.prev)
 		}},
-		{name: "deploy", build: func() tview.Primitive {
+		{name: "deploy", height: 13, build: func() tview.Primitive {
 			return deployScreen(func() { finished = true; app.Stop() }, w.prev)
 		}},
 	}
@@ -113,10 +131,12 @@ type wiz struct {
 func (w *wiz) show(i int) {
 	w.idx = i
 	p := w.order[i]
-	name := p.name
-	inner := p.build()
-	framed := tui.CenteredDialog(dialogTitle(w.version, name), inner, 76, 22)
-	w.pages.AddAndSwitchToPage(name, framed, true)
+	h := p.height
+	if h == 0 {
+		h = 22
+	}
+	framed := tui.CenteredDialog(dialogTitle(w.version, p.name), p.build(), dialogWidth, h)
+	w.pages.AddAndSwitchToPage(p.name, framed, true)
 	w.app.SetFocus(framed)
 }
 
