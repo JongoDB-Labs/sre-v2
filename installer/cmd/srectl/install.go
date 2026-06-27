@@ -63,21 +63,28 @@ func runInstall(out io.Writer, opts installOptions) error {
 		return err
 	}
 
-	files, err := render.Render(*answers, cat)
-	if err != nil {
-		return err
-	}
-
 	paths, err := render.Write(*answers, cat, opts.out)
 	if err != nil {
 		return err
 	}
 
-	// Echo the rendered files (the headline output of a dry-run).
-	for _, f := range files {
-		fmt.Fprintf(out, "# ---- %s ----\n%s\n", f.Name, f.Content)
+	// On a dry-run, echo the full rendered files — that is the point of a dry-run.
+	// The interactive/replay path stays terse: the wizard already showed a review,
+	// so we just confirm what was written.
+	if opts.dryRun {
+		files, err := render.Render(*answers, cat)
+		if err != nil {
+			return err
+		}
+		for _, f := range files {
+			fmt.Fprintf(out, "# ---- %s ----\n%s\n", f.Name, f.Content)
+		}
 	}
-	fmt.Fprintf(out, "wrote %d file(s) to %s\n", len(paths), opts.out)
+
+	fmt.Fprintf(out, "rendered %d file(s) to %s:\n", len(paths), opts.out)
+	for _, p := range paths {
+		fmt.Fprintf(out, "  • %s\n", p)
+	}
 
 	if opts.dryRun {
 		fmt.Fprintln(out, "\ndry-run: not deploying.")
