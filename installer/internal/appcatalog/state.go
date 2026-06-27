@@ -45,6 +45,7 @@ type Kube interface {
 	GetConfigMap(ns, name string) ([]byte, error)
 	ApplyConfigMap(ns, name string, data map[string]string) error
 	ListPackages() ([]byte, error)
+	CurrentContext() (string, error)
 }
 
 // State reads/writes the install-record ConfigMap and lists live UDS Packages.
@@ -226,4 +227,13 @@ func (execKube) ListPackages() ([]byte, error) {
 		return nil, fmt.Errorf("kubectl get packages: %w", err)
 	}
 	return out, nil
+}
+
+// CurrentContext returns the active kubeconfig context name, for the monitor header.
+func (execKube) CurrentContext() (string, error) {
+	out, err := commandContext("kubectl", "config", "current-context").Output()
+	if err != nil {
+		return "", fmt.Errorf("kubectl config current-context: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
 }
