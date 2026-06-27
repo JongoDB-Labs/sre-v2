@@ -46,8 +46,8 @@ func TestBuildPackageRows_Malformed(t *testing.T) {
 
 func TestBuildAppRows(t *testing.T) {
 	recs := map[string]appcatalog.Record{
-		"cosmos":  {Version: "2.102.0", Source: "oci:ghcr.io/jongodb-labs/bundles/cosmos"},
-		"orphan":  {Version: "0.1.0", Source: "oci:example/orphan"},
+		"cosmos": {Version: "2.102.0", Source: "oci:ghcr.io/jongodb-labs/bundles/cosmos"},
+		"orphan": {Version: "0.1.0", Source: "oci:example/orphan"},
 	}
 	live := map[string]bool{"cosmos": true} // orphan recorded but not live (drift)
 	got := buildAppRows(recs, live)

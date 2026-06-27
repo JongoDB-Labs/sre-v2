@@ -2,7 +2,7 @@
 // whiptail-style install wizard and the k9s-style monitor. It owns the global
 // tview.Styles palette and the centered-dialog frame both surfaces reuse. The
 // blue-on-gray look is the generic newt/ncurses aesthetic; the colors and text
-// are original (never Security Onion's).
+// are original.
 package tui
 
 import (
@@ -30,13 +30,13 @@ var (
 // before building any tview primitive.
 func ApplyTheme() {
 	tview.Styles = tview.Theme{
-		PrimitiveBackgroundColor:    ColorDialog,       // dialog bodies are gray
-		ContrastBackgroundColor:     ColorAccent,       // selection / active = blue
+		PrimitiveBackgroundColor:    ColorDialog, // dialog bodies are gray
+		ContrastBackgroundColor:     ColorAccent, // selection / active = blue
 		MoreContrastBackgroundColor: ColorAccent,
 		BorderColor:                 ColorBorder,
 		TitleColor:                  ColorAccent,
 		GraphicsColor:               ColorBorder,
-		PrimaryTextColor:            ColorDialogText,   // dark text on gray
+		PrimaryTextColor:            ColorDialogText, // dark text on gray
 		SecondaryTextColor:          ColorDialogText,
 		TertiaryTextColor:           ColorDialogText,
 		InverseTextColor:            ColorSelectedText, // text on the blue selection

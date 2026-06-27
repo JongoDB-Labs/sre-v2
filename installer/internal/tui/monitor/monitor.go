@@ -28,7 +28,10 @@ func Run(version string, state appcatalog.State) error {
 	app := tview.NewApplication()
 
 	header := tview.NewTextView().SetDynamicColors(true)
-	ctx, _ := state.Kube.CurrentContext() // best-effort; header is cosmetic
+	ctx, err := state.Kube.CurrentContext() // best-effort; header is cosmetic
+	if err != nil || ctx == "" {
+		ctx = "unknown"
+	}
 	header.SetText(fmt.Sprintf("%s   context: %s", tui.Title("SRE Monitor", version), ctx))
 
 	table := tview.NewTable().SetBorders(false).SetSelectable(true, false).SetFixed(1, 0)
@@ -125,8 +128,7 @@ func (m *monitor) paintPackages() {
 	m.setHeaderRow("NAMESPACE", "PACKAGE", "PHASE", "ENDPOINTS")
 	for i, r := range rows {
 		m.table.SetCellSimple(i+1, 0, r.Namespace)
-		m.table.SetCellSimple(i+1, 1, r.Name)
-		m.table.GetCell(i+1, 1).SetReference(r) // for future drill-in
+		m.table.SetCell(i+1, 1, tview.NewTableCell(r.Name).SetReference(r)) // ref for future drill-in
 		m.table.SetCell(i+1, 2, phaseCell(r.Phase))
 		m.table.SetCellSimple(i+1, 3, fmt.Sprintf("%d", r.Endpoints))
 	}

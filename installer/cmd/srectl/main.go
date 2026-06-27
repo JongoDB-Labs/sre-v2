@@ -1,6 +1,6 @@
-// Command srectl is the Security-Onion-style installer for the SRE substrate.
+// Command srectl is the whiptail-style installer for the SRE substrate.
 // It stands up the platform (round 1) and re-entrantly reconfigures it (Day-2):
-// a bubbletea TUI for humans plus full cobra CLI parity for headless/airgap use.
+// a tview TUI for humans plus full cobra CLI parity for headless/airgap use.
 //
 // Subcommands:
 //
