@@ -21,40 +21,59 @@ const (
 // refreshInterval is how often the background loop re-polls the cluster.
 const refreshInterval = 5 * time.Second
 
-// Run launches the k9s-style monitor: header + table + footer, with a background
-// refresh loop. Read-only; views switch with 1 (packages) / 2 (apps); q quits.
+// Console palette: a dark canvas — this is a live monitor, not the light install
+// wizard — sharing the wizard's accent / selection / status hues for cohesion.
+var (
+	consoleBg   = tcell.NewRGBColor(26, 30, 38)    // #1A1E26 dark slate canvas
+	consoleText = tcell.NewRGBColor(214, 218, 224) // #D6DAE0 primary text
+	consoleDim  = tcell.NewRGBColor(124, 134, 148) // #7C8694 labels / secondary
+	statusGreen = tcell.NewRGBColor(63, 185, 80)   // #3FB950 Ready / yes
+	statusAmber = tcell.NewRGBColor(210, 153, 34)  // #D29922 Pending / other
+	statusRed   = tcell.NewRGBColor(248, 81, 73)   // #F85149 Failed / drift / error
+)
+
+// Run launches the k9s-style monitor: header + table + footer over a dark canvas,
+// with a background refresh loop. Read-only; views switch with 1/2 or Tab; q quits.
 func Run(version string, state appcatalog.State) error {
 	tui.ApplyTheme()
 	app := tview.NewApplication()
 
 	header := tview.NewTextView().SetDynamicColors(true)
+	header.SetTextColor(consoleText).SetBackgroundColor(consoleBg)
+
+	table := tview.NewTable().SetBorders(false).SetSelectable(true, false).SetFixed(1, 0)
+	table.SetBackgroundColor(consoleBg)
+	table.SetSelectedStyle(tcell.StyleDefault.
+		Background(tui.ColorSelectBg).Foreground(tui.ColorSelectText).Bold(true))
+
+	footer := tview.NewTextView().SetDynamicColors(true)
+	footer.SetTextColor(consoleDim).SetBackgroundColor(consoleBg)
+	footer.SetText(footerText())
+
+	layout := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(header, 2, 0, false).
+		AddItem(table, 0, 1, true).
+		AddItem(footer, 1, 0, false)
+	layout.SetBackgroundColor(consoleBg)
+
 	ctx, err := state.Kube.CurrentContext() // best-effort; header is cosmetic
 	if err != nil || ctx == "" {
 		ctx = "unknown"
 	}
-	header.SetText(fmt.Sprintf("%s   context: %s", tui.Title("SRE Monitor", version), ctx))
 
-	table := tview.NewTable().SetBorders(false).SetSelectable(true, false).SetFixed(1, 0)
-	footer := tview.NewTextView().SetDynamicColors(true).
-		SetText("[::b]1[::-] packages  [::b]2[::-] apps  [::b]j/k[::-] move  [::b]q[::-] quit")
-
-	layout := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(header, 1, 0, false).
-		AddItem(table, 0, 1, true).
-		AddItem(footer, 1, 0, false)
-
-	m := &monitor{app: app, state: state, table: table, view: viewPackages}
+	m := &monitor{
+		app: app, state: state, table: table, header: header,
+		version: version, ctx: ctx, view: viewPackages,
+	}
 	m.refresh() // initial paint
 
 	app.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
 		switch ev.Rune() {
 		case '1':
-			m.view = viewPackages
-			m.refresh()
+			m.setView(viewPackages)
 			return nil
 		case '2':
-			m.view = viewApps
-			m.refresh()
+			m.setView(viewApps)
 			return nil
 		case 'q':
 			app.Stop()
@@ -64,7 +83,11 @@ func Run(version string, state appcatalog.State) error {
 		case 'k':
 			return tcell.NewEventKey(tcell.KeyUp, 0, tcell.ModNone)
 		}
-		if ev.Key() == tcell.KeyEscape {
+		switch ev.Key() {
+		case tcell.KeyTab:
+			m.setView(viewPackages + viewApps - m.view) // toggle the two views
+			return nil
+		case tcell.KeyEscape:
 			app.Stop()
 			return nil
 		}
@@ -95,14 +118,23 @@ func Run(version string, state appcatalog.State) error {
 
 // monitor holds the running view state.
 type monitor struct {
-	app   *tview.Application
-	state appcatalog.State
-	table *tview.Table
-	view  viewKind
+	app     *tview.Application
+	state   appcatalog.State
+	table   *tview.Table
+	header  *tview.TextView
+	version string
+	ctx     string
+	view    viewKind
 }
 
-// refresh re-fetches the active view's data and repaints the table. Fetch errors
-// are shown in-table rather than crashing the console.
+// setView switches the active view, resets the selection to the first row, and repaints.
+func (m *monitor) setView(v viewKind) {
+	m.view = v
+	m.refresh()
+	m.table.Select(1, 0)
+}
+
+// refresh re-fetches the active view's data and repaints the table + header.
 func (m *monitor) refresh() {
 	switch m.view {
 	case viewApps:
@@ -112,25 +144,37 @@ func (m *monitor) refresh() {
 	}
 }
 
+// setHeader updates the two-line header: title + context, then view · count.
+func (m *monitor) setHeader(view string, count int) {
+	m.header.SetText(fmt.Sprintf(
+		"[#9FB4D8::b]%s[-:-:-]   [#7C8694]context:[-] %s\n  [#FFFFFF::b]%s[-:-:-]  [#7C8694]· %d · refresh %ds[-]",
+		tui.Title("SRE Monitor", m.version), m.ctx, view, count, int(refreshInterval.Seconds())))
+}
+
 // paintPackages fills the table from the live UDS Packages.
 func (m *monitor) paintPackages() {
 	raw, err := m.state.Kube.ListPackages()
 	if err != nil {
-		m.paintError("packages", err)
+		m.paintError("PACKAGES", err)
 		return
 	}
 	rows, err := buildPackageRows(raw)
 	if err != nil {
-		m.paintError("packages", err)
+		m.paintError("PACKAGES", err)
 		return
 	}
 	m.table.Clear()
+	m.setHeader("PACKAGES", len(rows))
+	if len(rows) == 0 {
+		m.emptyRow("no UDS Packages found")
+		return
+	}
 	m.setHeaderRow("NAMESPACE", "PACKAGE", "PHASE", "ENDPOINTS")
 	for i, r := range rows {
-		m.table.SetCellSimple(i+1, 0, r.Namespace)
-		m.table.SetCell(i+1, 1, tview.NewTableCell(r.Name).SetReference(r)) // ref for future drill-in
+		m.table.SetCell(i+1, 0, cell(r.Namespace))
+		m.table.SetCell(i+1, 1, cell(r.Name).SetReference(r))
 		m.table.SetCell(i+1, 2, phaseCell(r.Phase))
-		m.table.SetCellSimple(i+1, 3, fmt.Sprintf("%d", r.Endpoints))
+		m.table.SetCell(i+1, 3, cell(fmt.Sprintf("%d", r.Endpoints)))
 	}
 }
 
@@ -138,54 +182,85 @@ func (m *monitor) paintPackages() {
 func (m *monitor) paintApps() {
 	recs, err := m.state.Load()
 	if err != nil {
-		m.paintError("apps", err)
+		m.paintError("APPS", err)
 		return
 	}
 	live, err := m.state.InstalledPackages()
 	if err != nil {
-		m.paintError("apps", err)
+		m.paintError("APPS", err)
 		return
 	}
 	rows := buildAppRows(recs, live)
 	m.table.Clear()
+	m.setHeader("APPS", len(rows))
+	if len(rows) == 0 {
+		m.emptyRow("no apps installed — deploy one with: srectl app install <name>")
+		return
+	}
 	m.setHeaderRow("APP", "VERSION", "SOURCE", "LIVE")
 	for i, r := range rows {
-		m.table.SetCellSimple(i+1, 0, r.Name)
-		m.table.SetCellSimple(i+1, 1, r.Version)
-		m.table.SetCellSimple(i+1, 2, r.Source)
+		m.table.SetCell(i+1, 0, cell(r.Name))
+		m.table.SetCell(i+1, 1, cell(r.Version))
+		m.table.SetCell(i+1, 2, cell(r.Source))
 		m.table.SetCell(i+1, 3, liveCell(r.Live))
 	}
 }
 
-// setHeaderRow writes the fixed, non-selectable header row.
+// setHeaderRow writes the fixed, non-selectable, dimmed column-header row.
 func (m *monitor) setHeaderRow(cols ...string) {
 	for c, name := range cols {
-		cell := tview.NewTableCell(name).SetSelectable(false).SetAttributes(tcell.AttrBold)
-		m.table.SetCell(0, c, cell)
+		m.table.SetCell(0, c, tview.NewTableCell(name+"  ").
+			SetSelectable(false).
+			SetTextColor(consoleDim).
+			SetAttributes(tcell.AttrBold))
 	}
+}
+
+// emptyRow shows a dim placeholder when a view has no rows (no column header, so
+// the message does not stretch the columns).
+func (m *monitor) emptyRow(msg string) {
+	m.table.SetCell(0, 0, tview.NewTableCell(msg).
+		SetTextColor(consoleDim).SetSelectable(false))
 }
 
 // paintError replaces the table with a single error row.
 func (m *monitor) paintError(view string, err error) {
 	m.table.Clear()
+	m.setHeader(view, 0)
 	m.setHeaderRow(view)
 	m.table.SetCell(1, 0, tview.NewTableCell(fmt.Sprintf("error: %v", err)).
-		SetTextColor(tcell.ColorRed))
+		SetTextColor(statusRed).SetSelectable(false))
 }
 
-// phaseCell colors a package phase (Ready green, anything else amber).
+// cell builds a standard data cell: light text with trailing padding so the
+// auto-sized columns breathe.
+func cell(text string) *tview.TableCell {
+	return tview.NewTableCell(text + "  ").SetTextColor(consoleText)
+}
+
+// phaseCell colours a package phase: Ready green, Failed red, anything else amber.
 func phaseCell(phase string) *tview.TableCell {
-	c := tview.NewTableCell(phase)
-	if phase == "Ready" {
-		return c.SetTextColor(tcell.ColorGreen)
+	c := tview.NewTableCell(phase + "  ")
+	switch phase {
+	case "Ready":
+		return c.SetTextColor(statusGreen)
+	case "Failed":
+		return c.SetTextColor(statusRed)
+	default:
+		return c.SetTextColor(statusAmber)
 	}
-	return c.SetTextColor(tcell.ColorYellow)
 }
 
 // liveCell renders the apps-view live flag.
 func liveCell(live bool) *tview.TableCell {
 	if live {
-		return tview.NewTableCell("yes").SetTextColor(tcell.ColorGreen)
+		return tview.NewTableCell("yes  ").SetTextColor(statusGreen)
 	}
-	return tview.NewTableCell("DRIFT").SetTextColor(tcell.ColorRed)
+	return tview.NewTableCell("DRIFT  ").SetTextColor(statusRed)
+}
+
+// footerText is the hotkey bar (bright keys, dim labels).
+func footerText() string {
+	return "  [#FFFFFF::b]1[-:-:-] [#7C8694]packages[-]   [#FFFFFF::b]2[-:-:-] [#7C8694]apps[-]   " +
+		"[#FFFFFF::b]Tab[-:-:-] [#7C8694]switch[-]   [#FFFFFF::b]j/k[-:-:-] [#7C8694]move[-]   [#FFFFFF::b]q[-:-:-] [#7C8694]quit[-]"
 }
