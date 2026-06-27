@@ -14,11 +14,11 @@ import (
 // (MetricsOK=false ⇒ Prometheus was unreachable; gauges/sparklines are omitted).
 type Inputs struct {
 	Nodes, Pods, Namespaces, Packages, FiringAlerts int
-	CPUPct, MemPct                                   float64
-	CPUSeries, MemSeries                             []float64
-	LayerHealth                                      [3]int // ok, warn, fail
-	AlertNames                                       []string
-	MetricsOK                                        bool
+	CPUPct, MemPct                                  float64
+	CPUSeries, MemSeries                            []float64
+	LayerHealth                                     [3]int // ok, warn, fail
+	AlertNames                                      []string
+	MetricsOK                                       bool
 }
 
 // BuildOverview renders the cross-layer dashboard as one tview-markup string.

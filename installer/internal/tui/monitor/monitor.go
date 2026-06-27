@@ -67,7 +67,7 @@ func Run(version string, state appcatalog.State) error {
 
 	// Discover Prometheus best-effort (degrade-safe).
 	prom := data.Prom{Raw: data.NewRaw()}
-	if svcs, err := data.NewRaw().Get("/api/v1/namespaces/monitoring/services?limit=500"); err == nil {
+	if svcs, err := prom.Raw.Get("/api/v1/namespaces/monitoring/services?limit=500"); err == nil {
 		if ref, derr := data.DiscoverPromRef(svcs); derr == nil {
 			prom.Ref = ref
 		}
