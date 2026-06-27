@@ -1,6 +1,7 @@
 package data
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -98,5 +99,23 @@ func TestProm_QueryRange_EncodesAndParses(t *testing.T) {
 	}
 	if !strings.Contains(fr.lastPath, "/query_range?query=count%28up%29&start=1782564025&end=1782564265&step=120") {
 		t.Fatalf("range path = %q", fr.lastPath)
+	}
+}
+
+// TestProm_Query_MalformedRef: Ref without "/" must return an error, not panic.
+func TestProm_Query_MalformedRef(t *testing.T) {
+	p := Prom{Raw: &fakeRaw{}, Ref: "noslash"}
+	_, err := p.Query("up")
+	if err == nil {
+		t.Fatal("expected error for malformed Ref, got nil")
+	}
+}
+
+// TestProm_Query_RawError: Raw.Get error must be propagated by Query.
+func TestProm_Query_RawError(t *testing.T) {
+	p := Prom{Raw: &fakeRaw{err: errors.New("boom")}, Ref: "monitoring/prometheus:9090"}
+	_, err := p.Query("up")
+	if err == nil {
+		t.Fatal("expected error from Raw.Get, got nil")
 	}
 }

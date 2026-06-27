@@ -43,13 +43,21 @@ func BuildOverview(in Inputs) string {
 	fmt.Fprintf(&b, "\n  [#9FB4D8::b]Health[-:-:-]   %s\n",
 		widgets.Health(in.LayerHealth[0], in.LayerHealth[1], in.LayerHealth[2]))
 
-	// Firing alerts.
+	// Firing alerts (capped at 8; overflow shown as "… and N more").
+	const alertCap = 8
 	b.WriteString("\n  [#9FB4D8::b]Alerts[-:-:-]\n")
 	if len(in.AlertNames) == 0 {
 		b.WriteString("    [#3fb950]none firing[-]\n")
 	} else {
-		for _, a := range in.AlertNames {
+		shown := in.AlertNames
+		if len(shown) > alertCap {
+			shown = shown[:alertCap]
+		}
+		for _, a := range shown {
 			fmt.Fprintf(&b, "    [#f85149]●[-] %s\n", a)
+		}
+		if extra := len(in.AlertNames) - alertCap; extra > 0 {
+			fmt.Fprintf(&b, "    [#7C8694]… and %d more[-]\n", extra)
 		}
 	}
 	return b.String()

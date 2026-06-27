@@ -24,3 +24,17 @@ func TestBuildOverview_MetricsDegraded(t *testing.T) {
 		t.Fatalf("degraded overview should note unavailable metrics:\n%s", out)
 	}
 }
+
+func TestBuildOverview_CapsAlerts(t *testing.T) {
+	names := []string{"A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "A9", "A10"}
+	out := BuildOverview(Inputs{AlertNames: names, FiringAlerts: len(names), MetricsOK: false})
+	if !strings.Contains(out, "A8") {
+		t.Fatalf("expected 8th alert name A8 in output:\n%s", out)
+	}
+	if strings.Contains(out, "A9") {
+		t.Fatalf("9th alert name A9 should be capped out:\n%s", out)
+	}
+	if !strings.Contains(out, "and 2 more") {
+		t.Fatalf("expected overflow line 'and 2 more' in output:\n%s", out)
+	}
+}

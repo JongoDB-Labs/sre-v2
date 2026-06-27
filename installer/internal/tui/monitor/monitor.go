@@ -223,9 +223,11 @@ func (m *monitor) paintOverview() {
 		} else {
 			in.CPUPct = firstValue(cpu)
 			in.MemPct = firstValue(mem)
+			seen := make(map[string]bool)
 			for _, a := range alerts {
 				name := a.Labels["alertname"]
-				if a.Labels["alertstate"] == "firing" && name != "" {
+				if a.Labels["alertstate"] == "firing" && name != "" && !seen[name] {
+					seen[name] = true
 					in.AlertNames = append(in.AlertNames, name)
 				}
 			}

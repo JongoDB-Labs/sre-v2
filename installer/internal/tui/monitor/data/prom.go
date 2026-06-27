@@ -58,7 +58,11 @@ func sampleValue(pair []any) (float64, error) {
 	if !ok {
 		return 0, fmt.Errorf("prom: value is not a string: %v", pair[1])
 	}
-	return strconv.ParseFloat(s, 64)
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0, fmt.Errorf("prom: parse value %q: %w", s, err)
+	}
+	return v, nil
 }
 
 // ParseVector parses an instant-query (vector) response into samples.
@@ -182,14 +186,22 @@ type Prom struct {
 }
 
 // proxyBase is the kube-API proxy prefix for the Prometheus HTTP API.
+// Returns "" if Ref is malformed (missing "/").
 func (p Prom) proxyBase() string {
 	parts := strings.SplitN(p.Ref, "/", 2) // ns / name:port
+	if len(parts) != 2 {
+		return ""
+	}
 	return fmt.Sprintf("/api/v1/namespaces/%s/services/%s/proxy/api/v1", parts[0], parts[1])
 }
 
 // Query runs an instant PromQL query and returns the vector samples.
 func (p Prom) Query(promql string) ([]Sample, error) {
-	path := p.proxyBase() + "/query?query=" + url.QueryEscape(promql)
+	base := p.proxyBase()
+	if base == "" {
+		return nil, fmt.Errorf("prom: invalid Ref %q", p.Ref)
+	}
+	path := base + "/query?query=" + url.QueryEscape(promql)
 	raw, err := p.Raw.Get(path)
 	if err != nil {
 		return nil, err
@@ -199,8 +211,12 @@ func (p Prom) Query(promql string) ([]Sample, error) {
 
 // QueryRange runs a range PromQL query (for sparklines) and returns the series.
 func (p Prom) QueryRange(promql string, start, end, step int64) ([]Series, error) {
+	base := p.proxyBase()
+	if base == "" {
+		return nil, fmt.Errorf("prom: invalid Ref %q", p.Ref)
+	}
 	path := fmt.Sprintf("%s/query_range?query=%s&start=%d&end=%d&step=%d",
-		p.proxyBase(), url.QueryEscape(promql), start, end, step)
+		base, url.QueryEscape(promql), start, end, step)
 	raw, err := p.Raw.Get(path)
 	if err != nil {
 		return nil, err
