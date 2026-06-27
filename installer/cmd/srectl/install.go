@@ -7,7 +7,7 @@ import (
 	"github.com/JongoDB-Labs/sre-v2/installer/internal/catalog"
 	"github.com/JongoDB-Labs/sre-v2/installer/internal/config"
 	"github.com/JongoDB-Labs/sre-v2/installer/internal/render"
-	"github.com/JongoDB-Labs/sre-v2/installer/internal/tui"
+	"github.com/JongoDB-Labs/sre-v2/installer/internal/tui/wizard"
 	"github.com/spf13/cobra"
 )
 
@@ -100,7 +100,7 @@ func resolveAnswers(out io.Writer, opts installOptions, cat *catalog.Catalog) (*
 	if opts.nonInteractive {
 		return nil, fmt.Errorf("--non-interactive requires --from <answers.yaml>")
 	}
-	return tui.RunWizard(cat)
+	return wizard.Run(cat, version)
 }
 
 // stubDeploy is the placeholder for the real deploy orchestration (build order
