@@ -2,10 +2,14 @@ package monitor
 
 import (
 	"fmt"
+	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/JongoDB-Labs/sre-v2/installer/internal/appcatalog"
 	"github.com/JongoDB-Labs/sre-v2/installer/internal/tui"
+	"github.com/JongoDB-Labs/sre-v2/installer/internal/tui/monitor/data"
+	"github.com/JongoDB-Labs/sre-v2/installer/internal/tui/monitor/views"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
@@ -14,7 +18,8 @@ import (
 type viewKind int
 
 const (
-	viewPackages viewKind = iota
+	viewOverview viewKind = iota
+	viewPackages
 	viewApps
 )
 
@@ -32,8 +37,11 @@ var (
 	statusRed   = tcell.NewRGBColor(248, 81, 73)   // #F85149 Failed / drift / error
 )
 
+// monitorCommandContext is the command builder for monitor kubectl calls (swappable in tests).
+var monitorCommandContext = exec.Command
+
 // Run launches the k9s-style monitor: header + table + footer over a dark canvas,
-// with a background refresh loop. Read-only; views switch with 1/2 or Tab; q quits.
+// with a background refresh loop. Read-only; views switch with 0/1/2 or Tab; q quits.
 func Run(version string, state appcatalog.State) error {
 	tui.ApplyTheme()
 	app := tview.NewApplication()
@@ -50,9 +58,24 @@ func Run(version string, state appcatalog.State) error {
 	footer.SetTextColor(consoleDim).SetBackgroundColor(consoleBg)
 	footer.SetText(footerText())
 
+	overviewTV := tview.NewTextView().SetDynamicColors(true).SetScrollable(true)
+	overviewTV.SetTextColor(consoleText).SetBackgroundColor(consoleBg)
+
+	main := tview.NewPages().
+		AddPage("overview", overviewTV, true, true).
+		AddPage("table", table, true, false)
+
+	// Discover Prometheus best-effort (degrade-safe).
+	prom := data.Prom{Raw: data.NewRaw()}
+	if svcs, err := data.NewRaw().Get("/api/v1/namespaces/monitoring/services?limit=500"); err == nil {
+		if ref, derr := data.DiscoverPromRef(svcs); derr == nil {
+			prom.Ref = ref
+		}
+	}
+
 	layout := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(header, 2, 0, false).
-		AddItem(table, 0, 1, true).
+		AddItem(main, 0, 1, true).
 		AddItem(footer, 1, 0, false)
 	layout.SetBackgroundColor(consoleBg)
 
@@ -63,12 +86,16 @@ func Run(version string, state appcatalog.State) error {
 
 	m := &monitor{
 		app: app, state: state, table: table, header: header,
-		version: version, ctx: ctx, view: viewPackages,
+		version: version, ctx: ctx, view: viewOverview,
+		main: main, overviewTV: overviewTV, prom: prom,
 	}
 	m.refresh() // initial paint
 
 	app.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
 		switch ev.Rune() {
+		case '0', 'o':
+			m.setView(viewOverview)
+			return nil
 		case '1':
 			m.setView(viewPackages)
 			return nil
@@ -85,7 +112,15 @@ func Run(version string, state appcatalog.State) error {
 		}
 		switch ev.Key() {
 		case tcell.KeyTab:
-			m.setView(viewPackages + viewApps - m.view) // toggle the two views
+			// Cycle overview → packages → apps → overview.
+			switch m.view {
+			case viewOverview:
+				m.setView(viewPackages)
+			case viewPackages:
+				m.setView(viewApps)
+			default:
+				m.setView(viewOverview)
+			}
 			return nil
 		case tcell.KeyEscape:
 			app.Stop()
@@ -118,30 +153,123 @@ func Run(version string, state appcatalog.State) error {
 
 // monitor holds the running view state.
 type monitor struct {
-	app     *tview.Application
-	state   appcatalog.State
-	table   *tview.Table
-	header  *tview.TextView
-	version string
-	ctx     string
-	view    viewKind
+	app        *tview.Application
+	state      appcatalog.State
+	table      *tview.Table
+	header     *tview.TextView
+	version    string
+	ctx        string
+	view       viewKind
+	main       *tview.Pages
+	overviewTV *tview.TextView
+	prom       data.Prom
 }
 
 // setView switches the active view, resets the selection to the first row, and repaints.
 func (m *monitor) setView(v viewKind) {
 	m.view = v
 	m.refresh()
-	m.table.Select(1, 0)
+	if v != viewOverview {
+		m.table.Select(1, 0)
+	}
 }
 
-// refresh re-fetches the active view's data and repaints the table + header.
+// refresh re-fetches the active view's data and repaints the content area + header.
 func (m *monitor) refresh() {
 	switch m.view {
+	case viewOverview:
+		m.main.SwitchToPage("overview")
+		m.paintOverview()
 	case viewApps:
+		m.main.SwitchToPage("table")
 		m.paintApps()
 	default:
+		m.main.SwitchToPage("table")
 		m.paintPackages()
 	}
+}
+
+// paintOverview fetches the cross-layer signals and renders the dashboard. Any
+// metrics failure degrades to MetricsOK=false rather than erroring.
+func (m *monitor) paintOverview() {
+	in := views.Inputs{MetricsOK: true}
+
+	// Package counts from the existing row builder.
+	if raw, err := m.state.Kube.ListPackages(); err == nil {
+		if rows, perr := buildPackageRows(raw); perr == nil {
+			in.Packages = len(rows)
+			ok := 0
+			for _, r := range rows {
+				if r.Phase == "Ready" {
+					ok++
+				}
+			}
+			in.LayerHealth = [3]int{ok, 0, len(rows) - ok}
+		}
+	}
+
+	// Node/pod/namespace counts via kubectl (best-effort).
+	in.Nodes, in.Pods, in.Namespaces = m.counts()
+
+	// Metrics from Prometheus (degrade on any failure or empty Ref).
+	if m.prom.Ref == "" {
+		in.MetricsOK = false
+	} else {
+		cpu, e1 := m.prom.Query(data.QNodeCPUPct)
+		mem, e2 := m.prom.Query(data.QNodeMemPct)
+		alerts, e3 := m.prom.Query(data.QFiringAlerts)
+		if e1 != nil || e2 != nil || e3 != nil {
+			in.MetricsOK = false
+		} else {
+			in.CPUPct = firstValue(cpu)
+			in.MemPct = firstValue(mem)
+			for _, a := range alerts {
+				name := a.Labels["alertname"]
+				if a.Labels["alertstate"] == "firing" && name != "" {
+					in.AlertNames = append(in.AlertNames, name)
+				}
+			}
+			in.FiringAlerts = len(in.AlertNames)
+		}
+	}
+
+	// Sparklines deferred to P1.2; ship instant gauges + counts + alerts.
+	m.overviewTV.SetText(views.BuildOverview(in))
+	m.setHeader("OVERVIEW", in.Packages)
+}
+
+// firstValue returns the value of the first sample, or 0.
+func firstValue(s []data.Sample) float64 {
+	if len(s) == 0 {
+		return 0
+	}
+	return s[0].Value
+}
+
+// counts returns node/pod/namespace counts via kubectl (best-effort, 0 on error).
+func (m *monitor) counts() (nodes, pods, namespaces int) {
+	count := func(args ...string) int {
+		out, err := monitorCommandContext("kubectl", args...).Output()
+		if err != nil {
+			return 0
+		}
+		return countNonEmpty(string(out))
+	}
+	nodes = count("get", "nodes", "--no-headers")
+	pods = count("get", "pods", "-A", "--no-headers")
+	namespaces = count("get", "ns", "--no-headers")
+	return
+}
+
+// countNonEmpty counts non-empty lines in s.
+func countNonEmpty(s string) int {
+	n := 0
+	for _, line := range strings.Split(s, "\n") {
+		if strings.TrimSpace(line) != "" {
+			n++
+		}
+	}
+	return n
 }
 
 // setHeader updates the two-line header: title + context, then view · count.
@@ -261,6 +389,7 @@ func liveCell(live bool) *tview.TableCell {
 
 // footerText is the hotkey bar (bright keys, dim labels).
 func footerText() string {
-	return "  [#FFFFFF::b]1[-:-:-] [#7C8694]packages[-]   [#FFFFFF::b]2[-:-:-] [#7C8694]apps[-]   " +
+	return "  [#FFFFFF::b]0[-:-:-] [#7C8694]overview[-]   " +
+		"[#FFFFFF::b]1[-:-:-] [#7C8694]packages[-]   [#FFFFFF::b]2[-:-:-] [#7C8694]apps[-]   " +
 		"[#FFFFFF::b]Tab[-:-:-] [#7C8694]switch[-]   [#FFFFFF::b]j/k[-:-:-] [#7C8694]move[-]   [#FFFFFF::b]q[-:-:-] [#7C8694]quit[-]"
 }
