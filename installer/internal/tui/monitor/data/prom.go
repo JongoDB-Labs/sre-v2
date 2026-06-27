@@ -4,12 +4,14 @@
 package data
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Sample is one instant (vector) result: its labels and parsed float value.
@@ -162,17 +164,20 @@ type Raw interface {
 	Get(path string) ([]byte, error)
 }
 
-// commandContext is the command builder (swappable in tests).
-var commandContext = exec.Command
+// rawTimeout bounds each `kubectl get --raw` so a stalled API call returns an
+// error (→ the monitor degrades to MetricsOK=false) instead of hanging the caller.
+const rawTimeout = 4 * time.Second
 
 type execRaw struct{}
 
 // NewRaw returns the production Raw wrapper.
 func NewRaw() Raw { return execRaw{} }
 
-// Get runs `kubectl get --raw <path>`.
+// Get runs `kubectl get --raw <path>`, bounded by rawTimeout.
 func (execRaw) Get(path string) ([]byte, error) {
-	out, err := commandContext("kubectl", "get", "--raw", path).Output()
+	ctx, cancel := context.WithTimeout(context.Background(), rawTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "kubectl", "get", "--raw", path).Output()
 	if err != nil {
 		return nil, fmt.Errorf("kubectl get --raw %s: %w", path, err)
 	}

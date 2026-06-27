@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -26,6 +27,10 @@ const (
 // refreshInterval is how often the background loop re-polls the cluster.
 const refreshInterval = 5 * time.Second
 
+// kubectlTimeout bounds each kubectl shell-out so a stalled API call cannot pile
+// up background fetches.
+const kubectlTimeout = 4 * time.Second
+
 // Console palette: a dark canvas — this is a live monitor, not the light install
 // wizard — sharing the wizard's accent / selection / status hues for cohesion.
 var (
@@ -37,11 +42,13 @@ var (
 	statusRed   = tcell.NewRGBColor(248, 81, 73)   // #F85149 Failed / drift / error
 )
 
-// monitorCommandContext is the command builder for monitor kubectl calls (swappable in tests).
-var monitorCommandContext = exec.Command
-
 // Run launches the k9s-style monitor: header + table + footer over a dark canvas,
 // with a background refresh loop. Read-only; views switch with 0/1/2 or Tab; q quits.
+//
+// Cluster I/O NEVER runs on the tview UI goroutine: each refresh fetches in a
+// background goroutine and marshals only the (cheap) draw through QueueUpdateDraw,
+// so a slow or stalled kubectl/Prometheus call can never freeze input (q stays
+// responsive).
 func Run(version string, state appcatalog.State) error {
 	tui.ApplyTheme()
 	app := tview.NewApplication()
@@ -60,18 +67,16 @@ func Run(version string, state appcatalog.State) error {
 
 	overviewTV := tview.NewTextView().SetDynamicColors(true).SetScrollable(true)
 	overviewTV.SetTextColor(consoleText).SetBackgroundColor(consoleBg)
+	overviewTV.SetText("  [#7C8694]loading…[-]")
 
 	main := tview.NewPages().
 		AddPage("overview", overviewTV, true, true).
 		AddPage("table", table, true, false)
 
-	// Discover Prometheus best-effort (degrade-safe).
+	// Prometheus + the kube context are discovered off the UI thread at startup
+	// (see the goroutine below), so app.Run() starts instantly. Ref stays empty
+	// (→ degraded) and the context shows "…" until then.
 	prom := data.Prom{Raw: data.NewRaw()}
-	if svcs, err := prom.Raw.Get("/api/v1/namespaces/monitoring/services?limit=500"); err == nil {
-		if ref, derr := data.DiscoverPromRef(svcs); derr == nil {
-			prom.Ref = ref
-		}
-	}
 
 	layout := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(header, 2, 0, false).
@@ -79,17 +84,12 @@ func Run(version string, state appcatalog.State) error {
 		AddItem(footer, 1, 0, false)
 	layout.SetBackgroundColor(consoleBg)
 
-	ctx, err := state.Kube.CurrentContext() // best-effort; header is cosmetic
-	if err != nil || ctx == "" {
-		ctx = "unknown"
-	}
-
 	m := &monitor{
 		app: app, state: state, table: table, header: header,
-		version: version, ctx: ctx, view: viewOverview,
+		version: version, ctx: "…", view: viewOverview,
 		main: main, overviewTV: overviewTV, prom: prom,
 	}
-	m.refresh() // initial paint
+	m.setHeader("OVERVIEW", 0) // initial header before the first fetch lands
 
 	app.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
 		switch ev.Rune() {
@@ -129,7 +129,30 @@ func Run(version string, state appcatalog.State) error {
 		return ev
 	})
 
-	// Background refresh loop: re-poll on an interval, redraw via QueueUpdateDraw.
+	// Startup: discover Prometheus + the kube context OFF the UI thread, then set
+	// them and trigger the first refresh (all on the UI goroutine via QueueUpdate).
+	// So a slow cluster can never block startup or input.
+	go func() {
+		ref := ""
+		if svcs, gerr := m.prom.Raw.Get("/api/v1/namespaces/monitoring/services?limit=500"); gerr == nil {
+			if r, derr := data.DiscoverPromRef(svcs); derr == nil {
+				ref = r
+			}
+		}
+		cx, cerr := state.Kube.CurrentContext()
+		if cerr != nil || cx == "" {
+			cx = "unknown"
+		}
+		app.QueueUpdate(func() {
+			m.prom.Ref = ref
+			m.ctx = cx
+			m.refresh()
+		})
+	}()
+
+	// Background refresh loop: every tick, ask the UI goroutine to kick off a
+	// fetch (QueueUpdate runs m.refresh on the main goroutine, which reads m.view
+	// safely and then spawns the off-UI fetch).
 	stop := make(chan struct{})
 	go func() {
 		t := time.NewTicker(refreshInterval)
@@ -139,7 +162,7 @@ func Run(version string, state appcatalog.State) error {
 			case <-stop:
 				return
 			case <-t.C:
-				app.QueueUpdateDraw(func() { m.refresh() })
+				app.QueueUpdate(func() { m.refresh() })
 			}
 		}
 	}()
@@ -165,33 +188,60 @@ type monitor struct {
 	prom       data.Prom
 }
 
-// setView switches the active view, resets the selection to the first row, and repaints.
+// setView switches the active view immediately (page + selection, both cheap) and
+// then kicks off an async refresh of its content. The page swap is instant so view
+// switching never waits on cluster I/O.
 func (m *monitor) setView(v viewKind) {
 	m.view = v
-	m.refresh()
-	if v != viewOverview {
+	if v == viewOverview {
+		m.main.SwitchToPage("overview")
+	} else {
+		m.main.SwitchToPage("table")
 		m.table.Select(1, 0)
 	}
+	m.refresh()
 }
 
-// refresh re-fetches the active view's data and repaints the content area + header.
+// refresh kicks off a background fetch for the current view and draws the result
+// via QueueUpdateDraw. It must be called on the UI goroutine (it reads m.view);
+// the fetch itself runs off it, so cluster I/O never blocks input.
 func (m *monitor) refresh() {
-	switch m.view {
-	case viewOverview:
-		m.main.SwitchToPage("overview")
-		m.paintOverview()
-	case viewApps:
-		m.main.SwitchToPage("table")
-		m.paintApps()
-	default:
-		m.main.SwitchToPage("table")
-		m.paintPackages()
-	}
+	view := m.view
+	prom := m.prom // captured on the UI goroutine; the fetch reads this copy
+	go func() {
+		switch view {
+		case viewOverview:
+			in := m.fetchOverview(prom)
+			m.app.QueueUpdateDraw(func() {
+				if m.view != view {
+					return
+				}
+				m.overviewTV.SetText(views.BuildOverview(in))
+				m.setHeader("OVERVIEW", in.Packages)
+			})
+		case viewApps:
+			res := m.fetchApps()
+			m.app.QueueUpdateDraw(func() {
+				if m.view != view {
+					return
+				}
+				m.drawTable(res)
+			})
+		default:
+			res := m.fetchPackages()
+			m.app.QueueUpdateDraw(func() {
+				if m.view != view {
+					return
+				}
+				m.drawTable(res)
+			})
+		}
+	}()
 }
 
-// paintOverview fetches the cross-layer signals and renders the dashboard. Any
+// fetchOverview gathers the cross-layer signals (off the UI goroutine). Any
 // metrics failure degrades to MetricsOK=false rather than erroring.
-func (m *monitor) paintOverview() {
+func (m *monitor) fetchOverview(prom data.Prom) views.Inputs {
 	in := views.Inputs{MetricsOK: true}
 
 	// Package counts from the existing row builder.
@@ -208,16 +258,16 @@ func (m *monitor) paintOverview() {
 		}
 	}
 
-	// Node/pod/namespace counts via kubectl (best-effort).
-	in.Nodes, in.Pods, in.Namespaces = m.counts()
+	// Node/pod/namespace counts via kubectl (best-effort, bounded by a timeout).
+	in.Nodes, in.Pods, in.Namespaces = counts()
 
 	// Metrics from Prometheus (degrade on any failure or empty Ref).
-	if m.prom.Ref == "" {
+	if prom.Ref == "" {
 		in.MetricsOK = false
 	} else {
-		cpu, e1 := m.prom.Query(data.QNodeCPUPct)
-		mem, e2 := m.prom.Query(data.QNodeMemPct)
-		alerts, e3 := m.prom.Query(data.QFiringAlerts)
+		cpu, e1 := prom.Query(data.QNodeCPUPct)
+		mem, e2 := prom.Query(data.QNodeMemPct)
+		alerts, e3 := prom.Query(data.QFiringAlerts)
 		if e1 != nil || e2 != nil || e3 != nil {
 			in.MetricsOK = false
 		} else {
@@ -234,10 +284,87 @@ func (m *monitor) paintOverview() {
 			in.FiringAlerts = len(in.AlertNames)
 		}
 	}
+	return in
+}
 
-	// Sparklines deferred to P1.2; ship instant gauges + counts + alerts.
-	m.overviewTV.SetText(views.BuildOverview(in))
-	m.setHeader("OVERVIEW", in.Packages)
+// tableResult is a fetched table view, built off the UI goroutine and ready to
+// draw on it. cols == nil means show the notice (empty-state or error) instead.
+type tableResult struct {
+	title   string
+	cols    []string
+	rows    [][]*tview.TableCell
+	notice  string
+	isError bool
+}
+
+// fetchPackages builds the packages table (off the UI goroutine).
+func (m *monitor) fetchPackages() tableResult {
+	raw, err := m.state.Kube.ListPackages()
+	if err != nil {
+		return tableResult{title: "PACKAGES", notice: "error: " + err.Error(), isError: true}
+	}
+	rows, err := buildPackageRows(raw)
+	if err != nil {
+		return tableResult{title: "PACKAGES", notice: "error: " + err.Error(), isError: true}
+	}
+	res := tableResult{title: "PACKAGES"}
+	if len(rows) == 0 {
+		res.notice = "no UDS Packages found"
+		return res
+	}
+	res.cols = []string{"NAMESPACE", "PACKAGE", "PHASE", "ENDPOINTS"}
+	for _, r := range rows {
+		res.rows = append(res.rows, []*tview.TableCell{
+			cell(r.Namespace), cell(r.Name).SetReference(r), phaseCell(r.Phase), cell(fmt.Sprintf("%d", r.Endpoints)),
+		})
+	}
+	return res
+}
+
+// fetchApps builds the apps table (off the UI goroutine).
+func (m *monitor) fetchApps() tableResult {
+	recs, err := m.state.Load()
+	if err != nil {
+		return tableResult{title: "APPS", notice: "error: " + err.Error(), isError: true}
+	}
+	live, err := m.state.InstalledPackages()
+	if err != nil {
+		return tableResult{title: "APPS", notice: "error: " + err.Error(), isError: true}
+	}
+	rows := buildAppRows(recs, live)
+	res := tableResult{title: "APPS"}
+	if len(rows) == 0 {
+		res.notice = "no apps installed — deploy one with: srectl app install <name>"
+		return res
+	}
+	res.cols = []string{"APP", "VERSION", "SOURCE", "LIVE"}
+	for _, r := range rows {
+		res.rows = append(res.rows, []*tview.TableCell{
+			cell(r.Name), cell(r.Version), cell(r.Source), liveCell(r.Live),
+		})
+	}
+	return res
+}
+
+// drawTable renders a tableResult into the table (on the UI goroutine).
+func (m *monitor) drawTable(res tableResult) {
+	m.table.Clear()
+	m.setHeader(res.title, len(res.rows))
+	if res.cols == nil {
+		colour := consoleDim
+		if res.isError {
+			colour = statusRed
+		}
+		m.table.SetCell(0, 0, tview.NewTableCell(res.notice).
+			SetTextColor(colour).SetSelectable(false))
+		return
+	}
+	m.setHeaderRow(res.cols...)
+	for i, row := range res.rows {
+		for j, c := range row {
+			m.table.SetCell(i+1, j, c)
+		}
+	}
 }
 
 // firstValue returns the value of the first sample, or 0.
@@ -248,10 +375,13 @@ func firstValue(s []data.Sample) float64 {
 	return s[0].Value
 }
 
-// counts returns node/pod/namespace counts via kubectl (best-effort, 0 on error).
-func (m *monitor) counts() (nodes, pods, namespaces int) {
+// counts returns node/pod/namespace counts via kubectl (best-effort, 0 on error,
+// each call bounded by kubectlTimeout).
+func counts() (nodes, pods, namespaces int) {
 	count := func(args ...string) int {
-		out, err := monitorCommandContext("kubectl", args...).Output()
+		ctx, cancel := context.WithTimeout(context.Background(), kubectlTimeout)
+		defer cancel()
+		out, err := exec.CommandContext(ctx, "kubectl", args...).Output()
 		if err != nil {
 			return 0
 		}
@@ -281,61 +411,6 @@ func (m *monitor) setHeader(view string, count int) {
 		tui.Title("SRE Monitor", m.version), m.ctx, view, count, int(refreshInterval.Seconds())))
 }
 
-// paintPackages fills the table from the live UDS Packages.
-func (m *monitor) paintPackages() {
-	raw, err := m.state.Kube.ListPackages()
-	if err != nil {
-		m.paintError("PACKAGES", err)
-		return
-	}
-	rows, err := buildPackageRows(raw)
-	if err != nil {
-		m.paintError("PACKAGES", err)
-		return
-	}
-	m.table.Clear()
-	m.setHeader("PACKAGES", len(rows))
-	if len(rows) == 0 {
-		m.emptyRow("no UDS Packages found")
-		return
-	}
-	m.setHeaderRow("NAMESPACE", "PACKAGE", "PHASE", "ENDPOINTS")
-	for i, r := range rows {
-		m.table.SetCell(i+1, 0, cell(r.Namespace))
-		m.table.SetCell(i+1, 1, cell(r.Name).SetReference(r))
-		m.table.SetCell(i+1, 2, phaseCell(r.Phase))
-		m.table.SetCell(i+1, 3, cell(fmt.Sprintf("%d", r.Endpoints)))
-	}
-}
-
-// paintApps fills the table from the install records joined with live presence.
-func (m *monitor) paintApps() {
-	recs, err := m.state.Load()
-	if err != nil {
-		m.paintError("APPS", err)
-		return
-	}
-	live, err := m.state.InstalledPackages()
-	if err != nil {
-		m.paintError("APPS", err)
-		return
-	}
-	rows := buildAppRows(recs, live)
-	m.table.Clear()
-	m.setHeader("APPS", len(rows))
-	if len(rows) == 0 {
-		m.emptyRow("no apps installed — deploy one with: srectl app install <name>")
-		return
-	}
-	m.setHeaderRow("APP", "VERSION", "SOURCE", "LIVE")
-	for i, r := range rows {
-		m.table.SetCell(i+1, 0, cell(r.Name))
-		m.table.SetCell(i+1, 1, cell(r.Version))
-		m.table.SetCell(i+1, 2, cell(r.Source))
-		m.table.SetCell(i+1, 3, liveCell(r.Live))
-	}
-}
-
 // setHeaderRow writes the fixed, non-selectable, dimmed column-header row.
 func (m *monitor) setHeaderRow(cols ...string) {
 	for c, name := range cols {
@@ -344,22 +419,6 @@ func (m *monitor) setHeaderRow(cols ...string) {
 			SetTextColor(consoleDim).
 			SetAttributes(tcell.AttrBold))
 	}
-}
-
-// emptyRow shows a dim placeholder when a view has no rows (no column header, so
-// the message does not stretch the columns).
-func (m *monitor) emptyRow(msg string) {
-	m.table.SetCell(0, 0, tview.NewTableCell(msg).
-		SetTextColor(consoleDim).SetSelectable(false))
-}
-
-// paintError replaces the table with a single error row.
-func (m *monitor) paintError(view string, err error) {
-	m.table.Clear()
-	m.setHeader(view, 0)
-	m.setHeaderRow(view)
-	m.table.SetCell(1, 0, tview.NewTableCell(fmt.Sprintf("error: %v", err)).
-		SetTextColor(statusRed).SetSelectable(false))
 }
 
 // cell builds a standard data cell: light text with trailing padding so the
