@@ -2,6 +2,7 @@ package data
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -57,5 +58,45 @@ func TestDiscoverPromRef(t *testing.T) {
 func TestDiscoverPromRef_NotFound(t *testing.T) {
 	if _, err := DiscoverPromRef([]byte(`{"items":[]}`)); err == nil {
 		t.Fatal("expected error when no prometheus service exists")
+	}
+}
+
+// fakeRaw records the requested path and returns canned bytes.
+type fakeRaw struct {
+	lastPath string
+	out      []byte
+	err      error
+}
+
+func (f *fakeRaw) Get(path string) ([]byte, error) { f.lastPath = path; return f.out, f.err }
+
+func TestProm_Query_BuildsProxyPathAndParses(t *testing.T) {
+	fr := &fakeRaw{out: []byte(vectorJSON)}
+	p := Prom{Raw: fr, Ref: "monitoring/kube-prometheus-stack-prometheus:9090"}
+	got, err := p.Query("up")
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("want 2 samples, got %d", len(got))
+	}
+	wantPath := "/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query=up"
+	if fr.lastPath != wantPath {
+		t.Fatalf("path = %q, want %q", fr.lastPath, wantPath)
+	}
+}
+
+func TestProm_QueryRange_EncodesAndParses(t *testing.T) {
+	fr := &fakeRaw{out: []byte(matrixJSON)}
+	p := Prom{Raw: fr, Ref: "monitoring/kube-prometheus-stack-prometheus:9090"}
+	got, err := p.QueryRange("count(up)", 1782564025, 1782564265, 120)
+	if err != nil {
+		t.Fatalf("QueryRange: %v", err)
+	}
+	if len(got) != 1 || len(got[0].Values) != 3 {
+		t.Fatalf("got %+v", got)
+	}
+	if !strings.Contains(fr.lastPath, "/query_range?query=count%28up%29&start=1782564025&end=1782564265&step=120") {
+		t.Fatalf("range path = %q", fr.lastPath)
 	}
 }

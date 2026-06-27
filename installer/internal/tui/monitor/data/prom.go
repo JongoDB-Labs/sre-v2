@@ -6,6 +6,8 @@ package data
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"os/exec"
 	"strconv"
 	"strings"
 )
@@ -140,4 +142,68 @@ func DiscoverPromRef(svcListJSON []byte) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("prom: no prometheus service (port 9090) found in svc list")
+}
+
+// Named PromQL the dashboard uses (kept as constants so each is reviewable).
+const (
+	QNodeCPUPct    = `100 - (avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)`
+	QNodeMemPct    = `100 * (1 - sum(node_memory_MemAvailable_bytes) / sum(node_memory_MemTotal_bytes))`
+	QFiringAlerts  = `ALERTS{alertstate="firing"}`
+	QNodeCPUSeries = `100 - (avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)`
+	QNodeMemSeries = `100 * (1 - sum(node_memory_MemAvailable_bytes) / sum(node_memory_MemTotal_bytes))`
+)
+
+// Raw runs `kubectl get --raw <path>` and returns the body. Tests inject a fake.
+type Raw interface {
+	Get(path string) ([]byte, error)
+}
+
+// commandContext is the command builder (swappable in tests).
+var commandContext = exec.Command
+
+type execRaw struct{}
+
+// NewRaw returns the production Raw wrapper.
+func NewRaw() Raw { return execRaw{} }
+
+// Get runs `kubectl get --raw <path>`.
+func (execRaw) Get(path string) ([]byte, error) {
+	out, err := commandContext("kubectl", "get", "--raw", path).Output()
+	if err != nil {
+		return nil, fmt.Errorf("kubectl get --raw %s: %w", path, err)
+	}
+	return out, nil
+}
+
+// Prom queries Prometheus through the kube-API proxy at Ref ("<ns>/<name>:<port>").
+type Prom struct {
+	Raw Raw
+	Ref string
+}
+
+// proxyBase is the kube-API proxy prefix for the Prometheus HTTP API.
+func (p Prom) proxyBase() string {
+	parts := strings.SplitN(p.Ref, "/", 2) // ns / name:port
+	return fmt.Sprintf("/api/v1/namespaces/%s/services/%s/proxy/api/v1", parts[0], parts[1])
+}
+
+// Query runs an instant PromQL query and returns the vector samples.
+func (p Prom) Query(promql string) ([]Sample, error) {
+	path := p.proxyBase() + "/query?query=" + url.QueryEscape(promql)
+	raw, err := p.Raw.Get(path)
+	if err != nil {
+		return nil, err
+	}
+	return ParseVector(raw)
+}
+
+// QueryRange runs a range PromQL query (for sparklines) and returns the series.
+func (p Prom) QueryRange(promql string, start, end, step int64) ([]Series, error) {
+	path := fmt.Sprintf("%s/query_range?query=%s&start=%d&end=%d&step=%d",
+		p.proxyBase(), url.QueryEscape(promql), start, end, step)
+	raw, err := p.Raw.Get(path)
+	if err != nil {
+		return nil, err
+	}
+	return ParseMatrix(raw)
 }
