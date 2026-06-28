@@ -21,6 +21,7 @@ type Resources interface {
 	Describe(kind, namespace, name string) (string, error)
 	Yaml(kind, namespace, name string) (string, error)
 	Logs(namespace, name string, tail int) (string, error)
+	LogsByLabel(namespace, selector, container string, tail int) ([]byte, error)
 	DeletePod(namespace, name string) (string, int, error)
 	RolloutRestart(kind, namespace, name string) (string, int, error)
 	SetCordon(node string, cordon bool) (string, int, error)
