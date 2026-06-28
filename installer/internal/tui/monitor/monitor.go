@@ -106,6 +106,7 @@ func Run(version string, state appcatalog.State) error {
 	}
 	m.cmdBar = cmdBar
 	m.detail = detail
+	m.footer = footer
 
 	cmdBar.SetDoneFunc(func(key tcell.Key) {
 		if key == tcell.KeyEnter {
@@ -153,12 +154,27 @@ func Run(version string, state appcatalog.State) error {
 			case 'q':
 				m.closeDetail()
 				return nil
+			case 'd':
+				m.setDrillMode("describe")
+				return nil
+			case 'y':
+				m.setDrillMode("yaml")
+				return nil
+			case 'l':
+				if m.drill.kind == "pods" {
+					m.setDrillMode("logs")
+				}
+				return nil
+			case 'j':
+				return tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone)
+			case 'k':
+				return tcell.NewEventKey(tcell.KeyUp, 0, tcell.ModNone)
 			}
 			if ev.Key() == tcell.KeyEscape {
 				m.closeDetail()
 				return nil
 			}
-			return ev // let the detail TextView scroll (arrows/PgUp/PgDn/j/k via tview)
+			return ev
 		}
 		switch ev.Rune() {
 		case '0', 'o':
@@ -287,6 +303,7 @@ type monitor struct {
 	prom       data.Prom
 	res        data.Resources    // kubectl resource fetcher (bounded 4s per call)
 	cmdBar     *tview.InputField // : command bar (hidden behind footer when idle)
+	footer     *tview.TextView   // footer hint bar (retained so detail can swap its text)
 	// detail pane (Task 3)
 	detail    *tview.TextView // scrollable kubectl-describe output pane
 	drill     drillTarget     // resource currently shown in detail
@@ -326,6 +343,7 @@ func (m *monitor) openDetail(dt drillTarget) {
 	m.main.SwitchToPage("detail")
 	m.app.SetFocus(m.detail)
 	m.setHeader(detailTitle(dt, "describe"), 0)
+	m.footer.SetText(detailFooter(dt.kind == "pods"))
 	m.drawDetail()
 }
 
@@ -370,6 +388,7 @@ func (m *monitor) closeDetail() {
 	m.inDetail = false
 	m.main.SwitchToPage("table")
 	m.app.SetFocus(m.main)
+	m.footer.SetText(footerText())
 	m.refresh() // restore the table header/count for the current view
 }
 
@@ -730,6 +749,27 @@ func liveCell(live bool) *tview.TableCell {
 		return tview.NewTableCell("yes  ").SetTextColor(statusGreen)
 	}
 	return tview.NewTableCell("DRIFT  ").SetTextColor(statusRed)
+}
+
+// setDrillMode switches the detail pane to a new mode and re-fetches (off-UI).
+func (m *monitor) setDrillMode(mode string) {
+	if m.drillMode == mode {
+		return
+	}
+	m.drillMode = mode
+	m.detail.SetText("  loading…").ScrollToBeginning()
+	m.setHeader(detailTitle(m.drill, mode), 0)
+	m.drawDetail()
+}
+
+// detailFooter is the hotkey bar shown while drilled into a resource.
+func detailFooter(podLogs bool) string {
+	logs := ""
+	if podLogs {
+		logs = "[#FFFFFF::b]l[-:-:-] [#7C8694]logs[-]   "
+	}
+	return "  [#FFFFFF::b]d[-:-:-] [#7C8694]describe[-]   [#FFFFFF::b]y[-:-:-] [#7C8694]yaml[-]   " + logs +
+		"[#FFFFFF::b]j/k[-:-:-] [#7C8694]scroll[-]   [#FFFFFF::b]q/Esc[-:-:-] [#7C8694]back[-]"
 }
 
 // footerText is the hotkey bar (bright keys, dim labels).
