@@ -24,6 +24,7 @@ type Resources interface {
 	DeletePod(namespace, name string) (string, int, error)
 	RolloutRestart(kind, namespace, name string) (string, int, error)
 	SetCordon(node string, cordon bool) (string, int, error)
+	Scale(kind, namespace, name string, replicas int) (string, int, error)
 }
 
 type execResources struct{}
@@ -335,4 +336,14 @@ func (execResources) RolloutRestart(kind, namespace, name string) (string, int, 
 // SetCordon cordons (cordon=true) or uncordons a node.
 func (execResources) SetCordon(node string, cordon bool) (string, int, error) {
 	return runAction(cordonArgs(node, cordon))
+}
+
+// scaleArgs builds `kubectl scale <kind> -n <ns> <name> --replicas=<n>`.
+func scaleArgs(kind, namespace, name string, replicas int) []string {
+	return []string{"scale", kind, "-n", namespace, name, fmt.Sprintf("--replicas=%d", replicas)}
+}
+
+// Scale sets a workload's replica count.
+func (execResources) Scale(kind, namespace, name string, replicas int) (string, int, error) {
+	return runAction(scaleArgs(kind, namespace, name, replicas))
 }

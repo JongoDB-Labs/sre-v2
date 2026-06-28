@@ -132,3 +132,14 @@ func TestActionArgs(t *testing.T) {
 		t.Fatalf("cordonArgs uncordon: %v", got)
 	}
 }
+
+func TestScaleArgs(t *testing.T) {
+	got := scaleArgs("deployments", "cosmos", "cosmos", 3)
+	want := []string{"scale", "deployments", "-n", "cosmos", "cosmos", "--replicas=3"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("scaleArgs: got %v want %v", got, want)
+	}
+	if got := scaleArgs("statefulsets", "cosmos", "cosmos-pg", 0); got[len(got)-1] != "--replicas=0" {
+		t.Fatalf("scaleArgs replicas=0: %v", got)
+	}
+}
