@@ -17,7 +17,7 @@ import (
 
 // tableView is a registered table screen. fetch is called off the UI goroutine
 // and returns the rows to draw; the returned tableResult carries its own title
-// and columns (set by fetchPackages/fetchApps), so no redundant fields here.
+// and columns (set by each view's fetch method), so no redundant fields here.
 type tableView struct {
 	fetch func() tableResult
 }
@@ -174,7 +174,7 @@ func Run(version string, state appcatalog.State) error {
 		}
 		switch ev.Key() {
 		case tcell.KeyTab:
-			// Cycle through m.viewOrder (overview → packages → apps → overview).
+			// Advance through m.viewOrder, wrapping at the end.
 			cur := 0
 			for i, name := range m.viewOrder {
 				if name == m.view {

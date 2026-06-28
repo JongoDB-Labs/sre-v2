@@ -22,7 +22,10 @@ func TestNodeRows(t *testing.T) {
 
 func TestNodeRows_NotReady(t *testing.T) {
 	raw := `{"items":[{"metadata":{"name":"n2","labels":{}},"status":{"conditions":[{"type":"Ready","status":"False"}],"nodeInfo":{"kubeletVersion":"v1"}}}]}`
-	got, _ := NodeRows([]byte(raw))
+	got, err := NodeRows([]byte(raw))
+	if err != nil {
+		t.Fatalf("NodeRows: %v", err)
+	}
 	if len(got) != 1 || got[0].Status != "NotReady" || got[0].Roles != "" {
 		t.Fatalf("got %+v", got)
 	}
@@ -63,7 +66,10 @@ func TestWorkloadRows_Deployment(t *testing.T) {
 }
 
 func TestWorkloadRows_DaemonSet(t *testing.T) {
-	got, _ := WorkloadRows([]byte(dsJSON), "DaemonSet")
+	got, err := WorkloadRows([]byte(dsJSON), "DaemonSet")
+	if err != nil {
+		t.Fatalf("WorkloadRows: %v", err)
+	}
 	want := []WorkloadRow{{Namespace: "kube-system", Kind: "DaemonSet", Name: "rke2-canal", Ready: "1/1"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v, want %+v", got, want)
