@@ -472,6 +472,27 @@ func (m *monitor) fetchOverview(prom data.Prom) views.Inputs {
 			}
 			in.FiringAlerts = len(in.AlertNames)
 		}
+		// Best-effort enrichments: a failure leaves the panel empty, it does NOT
+		// flip MetricsOK (the core CPU/MEM/alerts above own that).
+		if disk, err := prom.Query(data.QNodeDiskPct); err == nil {
+			in.DiskPct = firstValue(disk)
+		}
+		if load, err := prom.Query(data.QNodeLoad); err == nil {
+			in.Load = firstValue(load)
+		}
+		if phases, err := prom.Query(data.QPodPhase); err == nil {
+			in.PodPhases = data.PodPhaseCounts(phases)
+		}
+		// CPU/MEM trend sparklines: last 30 minutes at 1-minute resolution.
+		end := time.Now().Unix()
+		start := end - 1800
+		const step = int64(60)
+		if s, err := prom.QueryRange(data.QNodeCPUSeries, start, end, step); err == nil && len(s) > 0 {
+			in.CPUSeries = s[0].Values
+		}
+		if s, err := prom.QueryRange(data.QNodeMemSeries, start, end, step); err == nil && len(s) > 0 {
+			in.MemSeries = s[0].Values
+		}
 	}
 	return in
 }
