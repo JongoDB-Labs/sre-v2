@@ -105,6 +105,20 @@ func ParseMatrix(raw []byte) ([]Series, error) {
 	return out, nil
 }
 
+// PodPhaseCounts reduces a `sum by (phase) (kube_pod_status_phase)` vector to a
+// phase→count map. Samples without a phase label are skipped.
+func PodPhaseCounts(samples []Sample) map[string]int {
+	out := make(map[string]int, len(samples))
+	for _, s := range samples {
+		phase := s.Labels["phase"]
+		if phase == "" {
+			continue
+		}
+		out[phase] = int(s.Value)
+	}
+	return out
+}
+
 // DiscoverPromRef finds the Prometheus service in a `kubectl get svc -n monitoring
 // -o json` payload and returns "<ns>/<name>:9090". It skips the alertmanager,
 // operator, node-exporter, and kube-state-metrics services.
@@ -157,6 +171,12 @@ const (
 	QFiringAlerts  = `ALERTS{alertstate="firing"}`
 	QNodeCPUSeries = `100 - (avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)`
 	QNodeMemSeries = `100 * (1 - sum(node_memory_MemAvailable_bytes) / sum(node_memory_MemTotal_bytes))`
+	// QNodeDiskPct is root-filesystem usage %, sum-based across nodes (matches QNodeMemPct).
+	QNodeDiskPct = `100 * (1 - sum(node_filesystem_avail_bytes{mountpoint="/"}) / sum(node_filesystem_size_bytes{mountpoint="/"}))`
+	// QNodeLoad is the cluster-average 1-minute load.
+	QNodeLoad = `avg(node_load1)`
+	// QPodPhase is the pod count grouped by lifecycle phase (kube-state-metrics).
+	QPodPhase = `sum by (phase) (kube_pod_status_phase)`
 )
 
 // Raw runs `kubectl get --raw <path>` and returns the body. Tests inject a fake.

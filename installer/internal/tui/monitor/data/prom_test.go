@@ -119,3 +119,19 @@ func TestProm_Query_RawError(t *testing.T) {
 		t.Fatal("expected error from Raw.Get, got nil")
 	}
 }
+
+func TestPodPhaseCounts(t *testing.T) {
+	samples := []Sample{
+		{Labels: map[string]string{"phase": "Running"}, Value: 44},
+		{Labels: map[string]string{"phase": "Succeeded"}, Value: 12},
+		{Labels: map[string]string{"phase": "Pending"}, Value: 0},
+		{Labels: map[string]string{"phase": ""}, Value: 7}, // no phase label → skipped
+	}
+	got := PodPhaseCounts(samples)
+	if got["Running"] != 44 || got["Succeeded"] != 12 || got["Pending"] != 0 {
+		t.Fatalf("counts wrong: %+v", got)
+	}
+	if _, ok := got[""]; ok {
+		t.Fatalf("empty-phase sample must be skipped: %+v", got)
+	}
+}
