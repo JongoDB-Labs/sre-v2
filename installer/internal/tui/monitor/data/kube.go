@@ -3,6 +3,7 @@ package data
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"sort"
@@ -20,6 +21,9 @@ type Resources interface {
 	Describe(kind, namespace, name string) (string, error)
 	Yaml(kind, namespace, name string) (string, error)
 	Logs(namespace, name string, tail int) (string, error)
+	DeletePod(namespace, name string) (string, int, error)
+	RolloutRestart(kind, namespace, name string) (string, int, error)
+	SetCordon(node string, cordon bool) (string, int, error)
 }
 
 type execResources struct{}
@@ -274,4 +278,61 @@ func (execResources) Yaml(kind, namespace, name string) (string, error) {
 // Logs returns the last `tail` log lines of a pod.
 func (execResources) Logs(namespace, name string, tail int) (string, error) {
 	return runDetail(logsArgs(namespace, name, tail))
+}
+
+// actionTimeout bounds a mutating kubectl action (restart/cordon/rollout). Drain
+// (deferred) would need longer; these are quick.
+const actionTimeout = 15 * time.Second
+
+// deletePodArgs builds `kubectl delete pod -n <ns> <name>` (pod restart — the
+// controller recreates it).
+func deletePodArgs(namespace, name string) []string {
+	return []string{"delete", "pod", "-n", namespace, name}
+}
+
+// rolloutRestartArgs builds `kubectl rollout restart <kind> -n <ns> <name>`.
+func rolloutRestartArgs(kind, namespace, name string) []string {
+	return []string{"rollout", "restart", kind, "-n", namespace, name}
+}
+
+// cordonArgs builds `kubectl cordon|uncordon <node>`.
+func cordonArgs(node string, cordon bool) []string {
+	verb := "uncordon"
+	if cordon {
+		verb = "cordon"
+	}
+	return []string{verb, node}
+}
+
+// runAction runs a mutating `kubectl <args...>` bounded by actionTimeout, returning
+// combined output, the process exit code (0 on success), and error.
+func runAction(args []string) (string, int, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), actionTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "kubectl", args...).CombinedOutput()
+	code := 0
+	if err != nil {
+		code = 1
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			code = ee.ExitCode()
+		}
+		return string(out), code, fmt.Errorf("kubectl %s: %w", strings.Join(args, " "), err)
+	}
+	return string(out), code, nil
+}
+
+// DeletePod restarts a pod by deleting it (its controller recreates it).
+func (execResources) DeletePod(namespace, name string) (string, int, error) {
+	return runAction(deletePodArgs(namespace, name))
+}
+
+// RolloutRestart triggers a rolling restart of a workload.
+func (execResources) RolloutRestart(kind, namespace, name string) (string, int, error) {
+	return runAction(rolloutRestartArgs(kind, namespace, name))
+}
+
+// SetCordon cordons (cordon=true) or uncordons a node.
+func (execResources) SetCordon(node string, cordon bool) (string, int, error) {
+	return runAction(cordonArgs(node, cordon))
 }

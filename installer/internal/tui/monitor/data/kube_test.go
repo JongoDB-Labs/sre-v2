@@ -117,3 +117,18 @@ func TestLogsArgs(t *testing.T) {
 		t.Fatalf("got %v", got)
 	}
 }
+
+func TestActionArgs(t *testing.T) {
+	if got := deletePodArgs("cosmos", "cosmos-pg-0"); !reflect.DeepEqual(got, []string{"delete", "pod", "-n", "cosmos", "cosmos-pg-0"}) {
+		t.Fatalf("deletePodArgs: %v", got)
+	}
+	if got := rolloutRestartArgs("deployments", "authservice", "authservice"); !reflect.DeepEqual(got, []string{"rollout", "restart", "deployments", "-n", "authservice", "authservice"}) {
+		t.Fatalf("rolloutRestartArgs: %v", got)
+	}
+	if got := cordonArgs("cosmos-k8s", true); !reflect.DeepEqual(got, []string{"cordon", "cosmos-k8s"}) {
+		t.Fatalf("cordonArgs cordon: %v", got)
+	}
+	if got := cordonArgs("cosmos-k8s", false); !reflect.DeepEqual(got, []string{"uncordon", "cosmos-k8s"}) {
+		t.Fatalf("cordonArgs uncordon: %v", got)
+	}
+}
