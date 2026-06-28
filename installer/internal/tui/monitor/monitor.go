@@ -824,6 +824,7 @@ type action struct {
 	label, preview, auditAction    string
 	kind, namespace, name, command string                      // for the audit record
 	exec                           func() (string, int, error) // runs OFF the UI goroutine (Task 4)
+	needsReplicas                  bool                        // true for Scale: route to showScaleInput, not showConfirm
 }
 
 // actionsFor returns the reversible Day-2 actions available for a resource.
@@ -838,7 +839,17 @@ func (m *monitor) actionsFor(dt drillTarget) []action {
 			preview: fmt.Sprintf("Restart pod %s/%s?\n\nDeletes the pod; its controller recreates it.", dt.namespace, dt.name),
 			exec:    func() (string, int, error) { return m.res.DeletePod(dt.namespace, dt.name) },
 		}}
-	case "deployments", "statefulsets", "daemonsets":
+	case "deployments", "statefulsets":
+		return []action{
+			{label: "Rollout restart", auditAction: "rollout-restart",
+				kind: dt.kind, namespace: dt.namespace, name: dt.name,
+				command: fmt.Sprintf("kubectl rollout restart %s -n %s %s", dt.kind, dt.namespace, dt.name),
+				preview: fmt.Sprintf("Rollout-restart %s %s/%s?\n\nCycles its pods with a rolling update.", dt.kind, dt.namespace, dt.name),
+				exec:    func() (string, int, error) { return m.res.RolloutRestart(dt.kind, dt.namespace, dt.name) }},
+			{label: "Scale", auditAction: "scale", needsReplicas: true,
+				kind: dt.kind, namespace: dt.namespace, name: dt.name},
+		}
+	case "daemonsets":
 		return []action{{
 			label: "Rollout restart", auditAction: "rollout-restart",
 			kind: dt.kind, namespace: dt.namespace, name: dt.name,
@@ -889,6 +900,10 @@ func (m *monitor) openActions(dt drillTarget) {
 	m.showModal(fmt.Sprintf("Actions · %s/%s", dt.kind, dt.name), labels, func(i int, label string) {
 		if label == "Cancel" || i < 0 || i >= len(acts) {
 			m.closeModal()
+			return
+		}
+		if acts[i].needsReplicas {
+			m.showScaleInput(acts[i])
 			return
 		}
 		m.showConfirm(acts[i])
@@ -945,6 +960,9 @@ func (m *monitor) executePending() {
 		m.app.QueueUpdateDraw(func() { m.showResult(title, body) })
 	}()
 }
+
+// showScaleInput is implemented in slice-2 Task 3 (replicas input modal).
+func (m *monitor) showScaleInput(a action) { m.closeModal() }
 
 // showResult shows the action result; OK closes the overlay and refreshes the view.
 func (m *monitor) showResult(title, body string) {
