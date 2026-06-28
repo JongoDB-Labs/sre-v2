@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -961,8 +962,37 @@ func (m *monitor) executePending() {
 	}()
 }
 
-// showScaleInput is implemented in slice-2 Task 3 (replicas input modal).
-func (m *monitor) showScaleInput(a action) { m.closeModal() }
+// showScaleInput prompts for a replica count, then runs the scale via the shared
+// executePending path (off-UI + audited). A FRESH form each call (P3.1 focus lesson).
+func (m *monitor) showScaleInput(a action) {
+	form := tview.NewForm()
+	form.SetBackgroundColor(consoleBg)
+	form.AddInputField("Replicas", "", 6, func(textToCheck string, lastChar rune) bool {
+		return lastChar >= '0' && lastChar <= '9' // digits only
+	}, nil)
+	form.AddButton("Scale", func() {
+		text := form.GetFormItem(0).(*tview.InputField).GetText()
+		n, err := strconv.Atoi(text)
+		if err != nil || n < 0 {
+			return // invalid/empty → no-op; operator can correct or Cancel
+		}
+		scaled := a
+		scaled.command = fmt.Sprintf("kubectl scale %s -n %s %s --replicas=%d", a.kind, a.namespace, a.name, n)
+		scaled.preview = fmt.Sprintf("Scale %s/%s to %d?", a.name, a.namespace, n)
+		scaled.exec = func() (string, int, error) { return m.res.Scale(a.kind, a.namespace, a.name, n) }
+		m.pending = scaled
+		m.executePending() // running… → off-UI scale → audit → result
+	})
+	form.AddButton("Cancel", func() { m.closeModal() })
+	form.SetBorder(true).SetTitle(fmt.Sprintf(" Scale %s/%s ", a.kind, a.name)).SetTitleColor(consoleText)
+	form.SetButtonsAlign(tview.AlignCenter)
+	// Center the form over "main" with a Grid (transparent margins).
+	grid := tview.NewGrid().SetColumns(0, 44, 0).SetRows(0, 9, 0).AddItem(form, 1, 1, 1, 1, 0, 0, true)
+	m.root.RemovePage("modal")
+	m.root.AddPage("modal", grid, true, true)
+	m.modalActive = true
+	m.app.SetFocus(form)
+}
 
 // showResult shows the action result; OK closes the overlay and refreshes the view.
 func (m *monitor) showResult(title, body string) {
