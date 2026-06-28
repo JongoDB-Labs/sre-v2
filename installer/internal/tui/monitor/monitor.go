@@ -978,7 +978,7 @@ func (m *monitor) showScaleInput(a action) {
 		}
 		scaled := a
 		scaled.command = fmt.Sprintf("kubectl scale %s -n %s %s --replicas=%d", a.kind, a.namespace, a.name, n)
-		scaled.preview = fmt.Sprintf("Scale %s/%s to %d?", a.name, a.namespace, n)
+		scaled.preview = fmt.Sprintf("Scale %s/%s to %d?", a.namespace, a.name, n)
 		scaled.exec = func() (string, int, error) { return m.res.Scale(a.kind, a.namespace, a.name, n) }
 		m.pending = scaled
 		m.executePending() // running… → off-UI scale → audit → result
