@@ -826,6 +826,7 @@ type action struct {
 	kind, namespace, name, command string                      // for the audit record
 	exec                           func() (string, int, error) // runs OFF the UI goroutine (Task 4)
 	needsReplicas                  bool                        // true for Scale: route to showScaleInput, not showConfirm
+	needsTypedName                 bool                        // true for Delete: route to showTypedConfirm, not showConfirm
 }
 
 // actionsFor returns the reversible Day-2 actions available for a resource.
@@ -849,15 +850,21 @@ func (m *monitor) actionsFor(dt drillTarget) []action {
 				exec:    func() (string, int, error) { return m.res.RolloutRestart(dt.kind, dt.namespace, dt.name) }},
 			{label: "Scale", auditAction: "scale", needsReplicas: true,
 				kind: dt.kind, namespace: dt.namespace, name: dt.name},
+			{label: "Delete", auditAction: "delete", needsTypedName: true,
+				kind: dt.kind, namespace: dt.namespace, name: dt.name},
 		}
 	case "daemonsets":
-		return []action{{
-			label: "Rollout restart", auditAction: "rollout-restart",
-			kind: dt.kind, namespace: dt.namespace, name: dt.name,
-			command: fmt.Sprintf("kubectl rollout restart %s -n %s %s", dt.kind, dt.namespace, dt.name),
-			preview: fmt.Sprintf("Rollout-restart %s %s/%s?\n\nCycles its pods with a rolling update.", dt.kind, dt.namespace, dt.name),
-			exec:    func() (string, int, error) { return m.res.RolloutRestart(dt.kind, dt.namespace, dt.name) },
-		}}
+		return []action{
+			{
+				label: "Rollout restart", auditAction: "rollout-restart",
+				kind: dt.kind, namespace: dt.namespace, name: dt.name,
+				command: fmt.Sprintf("kubectl rollout restart %s -n %s %s", dt.kind, dt.namespace, dt.name),
+				preview: fmt.Sprintf("Rollout-restart %s %s/%s?\n\nCycles its pods with a rolling update.", dt.kind, dt.namespace, dt.name),
+				exec:    func() (string, int, error) { return m.res.RolloutRestart(dt.kind, dt.namespace, dt.name) },
+			},
+			{label: "Delete", auditAction: "delete", needsTypedName: true,
+				kind: dt.kind, namespace: dt.namespace, name: dt.name},
+		}
 	case "nodes":
 		return []action{
 			{label: "Cordon", auditAction: "cordon", kind: dt.kind, name: dt.name,
@@ -901,6 +908,10 @@ func (m *monitor) openActions(dt drillTarget) {
 	m.showModal(fmt.Sprintf("Actions · %s/%s", dt.kind, dt.name), labels, func(i int, label string) {
 		if label == "Cancel" || i < 0 || i >= len(acts) {
 			m.closeModal()
+			return
+		}
+		if acts[i].needsTypedName {
+			m.showTypedConfirm(acts[i])
 			return
 		}
 		if acts[i].needsReplicas {
@@ -993,6 +1004,9 @@ func (m *monitor) showScaleInput(a action) {
 	m.modalActive = true
 	m.app.SetFocus(form)
 }
+
+// showTypedConfirm is implemented in slice-3 Task 3 (typed-name confirm modal).
+func (m *monitor) showTypedConfirm(a action) { m.closeModal() }
 
 // showResult shows the action result; OK closes the overlay and refreshes the view.
 func (m *monitor) showResult(title, body string) {
