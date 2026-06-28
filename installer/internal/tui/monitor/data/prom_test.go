@@ -135,3 +135,21 @@ func TestPodPhaseCounts(t *testing.T) {
 		t.Fatalf("empty-phase sample must be skipped: %+v", got)
 	}
 }
+
+func TestAlertRows(t *testing.T) {
+	samples := []Sample{
+		{Labels: map[string]string{"alertname": "UDSProbeEndpointDown", "severity": "warning", "namespace": "grafana"}},
+		{Labels: map[string]string{"alertname": "etcdInsufficientMembers", "severity": "critical", "namespace": "kube-system"}},
+		{Labels: map[string]string{"alertname": "Watchdog", "severity": "none"}}, // synthetic → skipped
+	}
+	got := AlertRows(samples)
+	if len(got) != 2 {
+		t.Fatalf("want 2 rows (Watchdog skipped), got %d: %+v", len(got), got)
+	}
+	if got[0].Name != "etcdInsufficientMembers" || got[0].Severity != "critical" {
+		t.Fatalf("critical must sort first: %+v", got[0])
+	}
+	if got[1].Name != "UDSProbeEndpointDown" || got[1].Namespace != "grafana" {
+		t.Fatalf("row2 wrong: %+v", got[1])
+	}
+}

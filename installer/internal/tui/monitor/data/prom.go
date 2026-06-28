@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/url"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -117,6 +118,48 @@ func PodPhaseCounts(samples []Sample) map[string]int {
 		out[phase] = int(s.Value)
 	}
 	return out
+}
+
+// AlertRow is one firing alert for the security view.
+type AlertRow struct {
+	Name, Severity, Namespace string
+}
+
+// severityRank orders alert/event severities (lower = more urgent).
+func severityRank(s string) int {
+	switch strings.ToLower(s) {
+	case "critical", "emergency", "alert":
+		return 0
+	case "warning":
+		return 1
+	case "error", "err":
+		return 2
+	default:
+		return 3
+	}
+}
+
+// AlertRows reduces a firing-ALERTS vector to rows, skipping the synthetic
+// always-on Watchdog and any empty alertname, sorted by severity then name/namespace.
+func AlertRows(samples []Sample) []AlertRow {
+	rows := make([]AlertRow, 0, len(samples))
+	for _, s := range samples {
+		name := s.Labels["alertname"]
+		if name == "" || name == "Watchdog" {
+			continue
+		}
+		rows = append(rows, AlertRow{Name: name, Severity: s.Labels["severity"], Namespace: s.Labels["namespace"]})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if ri, rj := severityRank(rows[i].Severity), severityRank(rows[j].Severity); ri != rj {
+			return ri < rj
+		}
+		if rows[i].Name != rows[j].Name {
+			return rows[i].Name < rows[j].Name
+		}
+		return rows[i].Namespace < rows[j].Namespace
+	})
+	return rows
 }
 
 // DiscoverPromRef finds the Prometheus service in a `kubectl get svc -n monitoring
