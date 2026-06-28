@@ -47,3 +47,25 @@ func TestPodRows(t *testing.T) {
 		t.Fatalf("got %+v, want %+v", got, want)
 	}
 }
+
+const deployJSON = `{"items":[{"metadata":{"namespace":"authservice","name":"authservice"},"spec":{"replicas":2},"status":{"readyReplicas":1}}]}`
+const dsJSON = `{"items":[{"metadata":{"namespace":"kube-system","name":"rke2-canal"},"status":{"numberReady":1,"desiredNumberScheduled":1}}]}`
+
+func TestWorkloadRows_Deployment(t *testing.T) {
+	got, err := WorkloadRows([]byte(deployJSON), "Deployment")
+	if err != nil {
+		t.Fatalf("WorkloadRows: %v", err)
+	}
+	want := []WorkloadRow{{Namespace: "authservice", Kind: "Deployment", Name: "authservice", Ready: "1/2"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+}
+
+func TestWorkloadRows_DaemonSet(t *testing.T) {
+	got, _ := WorkloadRows([]byte(dsJSON), "DaemonSet")
+	want := []WorkloadRow{{Namespace: "kube-system", Kind: "DaemonSet", Name: "rke2-canal", Ready: "1/1"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+}

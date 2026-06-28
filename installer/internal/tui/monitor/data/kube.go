@@ -134,3 +134,44 @@ func PodRows(raw []byte) ([]PodRow, error) {
 	}
 	return rows, nil
 }
+
+// WorkloadRow is one row of the workloads view (a deploy/sts/ds).
+type WorkloadRow struct {
+	Namespace, Kind, Name, Ready string
+}
+
+// WorkloadRows parses a deployment/statefulset/daemonset list. DaemonSets report
+// readiness under different status fields than deployments/statefulsets.
+func WorkloadRows(raw []byte, kind string) ([]WorkloadRow, error) {
+	var list struct {
+		Items []struct {
+			Metadata struct {
+				Namespace string `json:"namespace"`
+				Name      string `json:"name"`
+			} `json:"metadata"`
+			Spec struct {
+				Replicas int `json:"replicas"`
+			} `json:"spec"`
+			Status struct {
+				ReadyReplicas          int `json:"readyReplicas"`
+				NumberReady            int `json:"numberReady"`
+				DesiredNumberScheduled int `json:"desiredNumberScheduled"`
+			} `json:"status"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &list); err != nil {
+		return nil, fmt.Errorf("data: parse %s json: %w", kind, err)
+	}
+	rows := make([]WorkloadRow, 0, len(list.Items))
+	for _, it := range list.Items {
+		ready, desired := it.Status.ReadyReplicas, it.Spec.Replicas
+		if kind == "DaemonSet" {
+			ready, desired = it.Status.NumberReady, it.Status.DesiredNumberScheduled
+		}
+		rows = append(rows, WorkloadRow{
+			Namespace: it.Metadata.Namespace, Kind: kind, Name: it.Metadata.Name,
+			Ready: fmt.Sprintf("%d/%d", ready, desired),
+		})
+	}
+	return rows, nil
+}
