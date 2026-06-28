@@ -71,9 +71,15 @@ func Run(version string, state appcatalog.State) error {
 	overviewTV.SetTextColor(consoleText).SetBackgroundColor(consoleBg)
 	overviewTV.SetText("  [#7C8694]loading…[-]")
 
+	// detail pane: SetDynamicColors(false) is REQUIRED — raw YAML/log output
+	// contains "[...]" that must NOT be parsed as tview color tags.
+	detail := tview.NewTextView().SetDynamicColors(false).SetScrollable(true).SetWrap(false)
+	detail.SetTextColor(consoleText).SetBackgroundColor(consoleBg)
+
 	main := tview.NewPages().
 		AddPage("overview", overviewTV, true, true).
-		AddPage("table", table, true, false)
+		AddPage("table", table, true, false).
+		AddPage("detail", detail, true, false)
 
 	// Prometheus + the kube context are discovered off the UI thread at startup
 	// (see the goroutine below), so app.Run() starts instantly. Ref stays empty
@@ -99,6 +105,7 @@ func Run(version string, state appcatalog.State) error {
 		res: data.NewResources(),
 	}
 	m.cmdBar = cmdBar
+	m.detail = detail
 
 	cmdBar.SetDoneFunc(func(key tcell.Key) {
 		if key == tcell.KeyEnter {
@@ -138,6 +145,21 @@ func Run(version string, state appcatalog.State) error {
 		if m.app.GetFocus() == m.cmdBar {
 			return ev
 		}
+		// Detail-mode guard: when the detail pane is open, intercept close keys
+		// first so 'q' closes the pane rather than quitting the app, and pass
+		// everything else through so the focused TextView can handle scrolling.
+		if m.inDetail {
+			switch ev.Rune() {
+			case 'q':
+				m.closeDetail()
+				return nil
+			}
+			if ev.Key() == tcell.KeyEscape {
+				m.closeDetail()
+				return nil
+			}
+			return ev // let the detail TextView scroll (arrows/PgUp/PgDn/j/k via tview)
+		}
 		switch ev.Rune() {
 		case '0', 'o':
 			m.setView("overview")
@@ -173,6 +195,19 @@ func Run(version string, state appcatalog.State) error {
 			return tcell.NewEventKey(tcell.KeyUp, 0, tcell.ModNone)
 		}
 		switch ev.Key() {
+		case tcell.KeyEnter:
+			// Drill into the selected row's resource (table views only).
+			// Overview has no table rows; packages/apps rows carry a different
+			// reference type so the drillTarget assertion safely fails there.
+			if m.view != "overview" {
+				row, _ := m.table.GetSelection()
+				if c := m.table.GetCell(row, 0); c != nil {
+					if dt, ok := c.GetReference().(drillTarget); ok {
+						m.openDetail(dt)
+					}
+				}
+			}
+			return nil
 		case tcell.KeyTab:
 			// Advance through m.viewOrder, wrapping at the end.
 			cur := 0
@@ -252,6 +287,11 @@ type monitor struct {
 	prom       data.Prom
 	res        data.Resources    // kubectl resource fetcher (bounded 4s per call)
 	cmdBar     *tview.InputField // : command bar (hidden behind footer when idle)
+	// detail pane (Task 3)
+	detail    *tview.TextView // scrollable kubectl-describe output pane
+	drill     drillTarget     // resource currently shown in detail
+	drillMode string          // "describe" | "yaml" | "logs"
+	inDetail  bool            // true while the detail page is front
 }
 
 // setView switches the active view immediately (page + selection, both cheap) and
@@ -272,6 +312,65 @@ func (m *monitor) setView(name string) {
 		m.table.Select(1, 0)
 	}
 	m.refresh()
+}
+
+// logsTailLines is the maximum number of log lines fetched when drillMode=="logs".
+const logsTailLines = 200
+
+// openDetail enters the detail pane for a row's target, defaulting to describe.
+func (m *monitor) openDetail(dt drillTarget) {
+	m.drill = dt
+	m.drillMode = "describe"
+	m.inDetail = true
+	m.detail.SetText("  loading…").ScrollToBeginning()
+	m.main.SwitchToPage("detail")
+	m.app.SetFocus(m.detail)
+	m.setHeader(detailTitle(dt, "describe"), 0)
+	m.drawDetail()
+}
+
+// drawDetail fetches the current drill mode OFF the UI goroutine and sets the
+// detail text on it (anti-freeze: only the SetText draw is marshalled back, and
+// it's dropped if the user has since left this target/mode).
+func (m *monitor) drawDetail() {
+	dt := m.drill
+	mode := m.drillMode
+	go func() {
+		var text string
+		var err error
+		switch mode {
+		case "yaml":
+			text, err = m.res.Yaml(dt.kind, dt.namespace, dt.name)
+		case "logs":
+			text, err = m.res.Logs(dt.namespace, dt.name, logsTailLines)
+		default:
+			text, err = m.res.Describe(dt.kind, dt.namespace, dt.name)
+		}
+		if err != nil && text == "" {
+			text = "error: " + err.Error()
+		}
+		m.app.QueueUpdateDraw(func() {
+			// Staleness guard: drop the update if the user has already navigated
+			// away from this target or mode (e.g. closed the pane or switched mode).
+			if !m.inDetail || m.drill != dt || m.drillMode != mode {
+				return
+			}
+			m.detail.SetText(text).ScrollToBeginning()
+		})
+	}()
+}
+
+// detailTitle is the header label for a drill view, e.g. "PODS/cosmos-abc · describe".
+func detailTitle(dt drillTarget, mode string) string {
+	return fmt.Sprintf("%s/%s · %s", strings.ToUpper(dt.kind), dt.name, mode)
+}
+
+// closeDetail returns from the detail pane to the table.
+func (m *monitor) closeDetail() {
+	m.inDetail = false
+	m.main.SwitchToPage("table")
+	m.app.SetFocus(m.main)
+	m.refresh() // restore the table header/count for the current view
 }
 
 // refresh kicks off a background fetch for the current view and draws the result
