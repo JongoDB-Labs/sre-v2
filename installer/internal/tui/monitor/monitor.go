@@ -1005,8 +1005,37 @@ func (m *monitor) showScaleInput(a action) {
 	m.app.SetFocus(form)
 }
 
-// showTypedConfirm is implemented in slice-3 Task 3 (typed-name confirm modal).
-func (m *monitor) showTypedConfirm(a action) { m.closeModal() }
+// showTypedConfirm is the typed-name gate for a destructive action (spec §3.4): the
+// operator must type the resource's exact name to confirm. On match it runs the
+// action via the shared executePending (off-UI + audited). Fresh form per call.
+func (m *monitor) showTypedConfirm(a action) {
+	form := tview.NewForm()
+	form.SetBackgroundColor(consoleBg)
+	form.AddInputField(fmt.Sprintf("Type \"%s\" to confirm", a.name), "", 40, nil, nil)
+	form.AddButton("Delete", func() {
+		typed := strings.TrimSpace(form.GetFormItem(0).(*tview.InputField).GetText())
+		if typed != a.name {
+			return // name mismatch (incl. empty) → no delete; operator can correct or Cancel
+		}
+		del := a
+		del.command = fmt.Sprintf("kubectl delete %s -n %s %s", a.kind, a.namespace, a.name)
+		del.preview = fmt.Sprintf("Delete %s %s/%s", a.kind, a.namespace, a.name)
+		del.exec = func() (string, int, error) { return m.res.Delete(a.kind, a.namespace, a.name) }
+		m.pending = del
+		m.executePending()
+	})
+	form.AddButton("Cancel", func() { m.closeModal() })
+	form.SetBorder(true).
+		SetTitle(fmt.Sprintf(" ⚠ Delete %s/%s ", a.kind, a.name)).
+		SetTitleColor(statusRed)
+	form.SetButtonsAlign(tview.AlignCenter)
+	// Center the form over "main" with a Grid (transparent margins).
+	grid := tview.NewGrid().SetColumns(0, 56, 0).SetRows(0, 11, 0).AddItem(form, 1, 1, 1, 1, 0, 0, true)
+	m.root.RemovePage("modal")
+	m.root.AddPage("modal", grid, true, true)
+	m.modalActive = true
+	m.app.SetFocus(form)
+}
 
 // showResult shows the action result; OK closes the overlay and refreshes the view.
 func (m *monitor) showResult(title, body string) {
