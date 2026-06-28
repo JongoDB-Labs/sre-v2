@@ -364,6 +364,12 @@ type tableResult struct {
 	isError bool
 }
 
+// drillTarget identifies the resource a table row points at, for Enter-to-drill.
+// namespace == "" means cluster-scoped (node). kind is the kubectl resource name.
+type drillTarget struct {
+	kind, namespace, name string
+}
+
 // fetchPackages builds the packages table (off the UI goroutine).
 func (m *monitor) fetchPackages() tableResult {
 	raw, err := m.state.Kube.ListPackages()
@@ -533,7 +539,10 @@ func (m *monitor) fetchNodes() tableResult {
 	}
 	res.cols = []string{"NAME", "ROLES", "STATUS", "VERSION"}
 	for _, r := range rows {
-		res.rows = append(res.rows, []*tview.TableCell{cell(r.Name), cell(r.Roles), statusCell(r.Status), cell(r.Version)})
+		res.rows = append(res.rows, []*tview.TableCell{
+			cell(r.Name).SetReference(drillTarget{kind: "nodes", name: r.Name}),
+			cell(r.Roles), statusCell(r.Status), cell(r.Version),
+		})
 	}
 	return res
 }
@@ -556,7 +565,8 @@ func (m *monitor) fetchPods() tableResult {
 	res.cols = []string{"NAMESPACE", "NAME", "READY", "STATUS", "RESTARTS", "NODE"}
 	for _, r := range rows {
 		res.rows = append(res.rows, []*tview.TableCell{
-			cell(r.Namespace), cell(r.Name), cell(r.Ready), statusCell(r.Status), cell(fmt.Sprintf("%d", r.Restarts)), cell(r.Node),
+			cell(r.Namespace).SetReference(drillTarget{kind: "pods", namespace: r.Namespace, name: r.Name}),
+			cell(r.Name), cell(r.Ready), statusCell(r.Status), cell(fmt.Sprintf("%d", r.Restarts)), cell(r.Node),
 		})
 	}
 	return res
@@ -566,7 +576,6 @@ func (m *monitor) fetchPods() tableResult {
 func (m *monitor) fetchWorkloads() tableResult {
 	res := tableResult{title: "WORKLOADS"}
 	specs := []struct{ arg, kind string }{{"deployments", "Deployment"}, {"statefulsets", "StatefulSet"}, {"daemonsets", "DaemonSet"}}
-	var all []data.WorkloadRow
 	for _, s := range specs {
 		raw, err := m.res.Get(s.arg, "-A")
 		if err != nil {
@@ -576,16 +585,18 @@ func (m *monitor) fetchWorkloads() tableResult {
 		if err != nil {
 			return tableResult{title: "WORKLOADS", notice: "error: " + err.Error(), isError: true}
 		}
-		all = append(all, rows...)
+		for _, r := range rows {
+			res.rows = append(res.rows, []*tview.TableCell{
+				cell(r.Namespace).SetReference(drillTarget{kind: s.arg, namespace: r.Namespace, name: r.Name}),
+				cell(r.Kind), cell(r.Name), cell(r.Ready),
+			})
+		}
 	}
-	if len(all) == 0 {
+	if len(res.rows) == 0 {
 		res.notice = "no workloads"
 		return res
 	}
 	res.cols = []string{"NAMESPACE", "KIND", "NAME", "READY"}
-	for _, r := range all {
-		res.rows = append(res.rows, []*tview.TableCell{cell(r.Namespace), cell(r.Kind), cell(r.Name), cell(r.Ready)})
-	}
 	return res
 }
 
@@ -606,7 +617,10 @@ func (m *monitor) fetchServices() tableResult {
 	}
 	res.cols = []string{"NAMESPACE", "NAME", "TYPE", "PORTS"}
 	for _, r := range rows {
-		res.rows = append(res.rows, []*tview.TableCell{cell(r.Namespace), cell(r.Name), cell(r.Type), cell(r.Ports)})
+		res.rows = append(res.rows, []*tview.TableCell{
+			cell(r.Namespace).SetReference(drillTarget{kind: "services", namespace: r.Namespace, name: r.Name}),
+			cell(r.Name), cell(r.Type), cell(r.Ports),
+		})
 	}
 	return res
 }
