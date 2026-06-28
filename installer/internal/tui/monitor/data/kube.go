@@ -221,9 +221,6 @@ func ServiceRows(raw []byte) ([]ServiceRow, error) {
 // list timeout: describe and a tailed log can be a touch slower than a get).
 const detailTimeout = 8 * time.Second
 
-// logsTailLines is how many trailing log lines the detail pane fetches.
-const logsTailLines = 200
-
 // describeArgs builds `kubectl describe <kind> [-n ns] <name>`. A cluster-scoped
 // resource (node) has ns == "" and omits the namespace flag.
 func describeArgs(kind, namespace, name string) []string {

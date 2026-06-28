@@ -213,8 +213,8 @@ func Run(version string, state appcatalog.State) error {
 		switch ev.Key() {
 		case tcell.KeyEnter:
 			// Drill into the selected row's resource (table views only).
-			// Overview has no table rows; packages/apps rows carry a different
-			// reference type so the drillTarget assertion safely fails there.
+			// Overview has no table rows; packages rows carry a PackageRow reference
+			// and apps rows carry none, so the drillTarget type-assertion fails for both.
 			if m.view != "overview" {
 				row, _ := m.table.GetSelection()
 				if c := m.table.GetCell(row, 0); c != nil {
