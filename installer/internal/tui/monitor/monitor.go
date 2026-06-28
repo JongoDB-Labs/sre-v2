@@ -396,6 +396,10 @@ func (m *monitor) closeDetail() {
 // via QueueUpdateDraw. It must be called on the UI goroutine (it reads m.view);
 // the fetch itself runs off it, so cluster I/O never blocks input.
 func (m *monitor) refresh() {
+	if m.inDetail {
+		return // the detail pane owns the header/screen while drilled; don't let the
+		// background table refresh clobber the detail title or waste a fetch
+	}
 	view := m.view
 	prom := m.prom // captured on the UI goroutine; the fetch reads this copy
 	go func() {
