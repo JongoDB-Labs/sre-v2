@@ -146,6 +146,12 @@ func Run(version string, state appcatalog.State) error {
 		if m.app.GetFocus() == m.cmdBar {
 			return ev
 		}
+		// Modal guard: while the action menu or confirm overlay is visible, let the
+		// modal handle all input (button navigation, Enter to confirm, Esc/Tab to
+		// move between buttons). Global hotkeys must not fire underneath the overlay.
+		if m.modalActive {
+			return ev
+		}
 		// Detail-mode guard: when the detail pane is open, intercept close keys
 		// first so 'q' closes the pane rather than quitting the app, and pass
 		// everything else through so the focused TextView can handle scrolling.
@@ -197,6 +203,18 @@ func Run(version string, state appcatalog.State) error {
 			return nil
 		case '6':
 			m.setView("services")
+			return nil
+		case 'a':
+			// Open the action menu for the selected row (table views only; not while
+			// in the detail pane — the inDetail guard above already returned for that).
+			if m.view != "overview" {
+				row, _ := m.table.GetSelection()
+				if c := m.table.GetCell(row, 0); c != nil {
+					if dt, ok := c.GetReference().(drillTarget); ok {
+						m.openActions(dt)
+					}
+				}
+			}
 			return nil
 		case ':':
 			bottom.SwitchToPage("cmd")
@@ -281,7 +299,14 @@ func Run(version string, state appcatalog.State) error {
 	}()
 	defer close(stop)
 
-	if err := app.SetRoot(layout, true).Run(); err != nil {
+	modal := tview.NewModal()
+	m.modal = modal
+	root := tview.NewPages().
+		AddPage("main", layout, true, true).
+		AddPage("modal", modal, true, false) // hidden; shown over main during an action
+	m.root = root
+
+	if err := app.SetRoot(root, true).Run(); err != nil {
 		return fmt.Errorf("monitor: run: %w", err)
 	}
 	return nil
@@ -304,11 +329,16 @@ type monitor struct {
 	res        data.Resources    // kubectl resource fetcher (bounded 4s per call)
 	cmdBar     *tview.InputField // : command bar (hidden behind footer when idle)
 	footer     *tview.TextView   // footer hint bar (retained so detail can swap its text)
-	// detail pane (Task 3)
+	// detail pane (Task 2)
 	detail    *tview.TextView // scrollable kubectl-describe output pane
 	drill     drillTarget     // resource currently shown in detail
 	drillMode string          // "describe" | "yaml" | "logs"
 	inDetail  bool            // true while the detail page is front
+	// action modal (Task 3)
+	modal       *tview.Modal // single reconfigurable modal; reused for menu + confirm
+	root        *tview.Pages // top-level pages: "main" (layout) + "modal" (overlay)
+	modalActive bool         // true while the modal overlay is visible
+	pending     action       // action selected in the menu, awaiting confirm (Task 4)
 }
 
 // setView switches the active view immediately (page + selection, both cheap) and
@@ -787,6 +817,92 @@ func (m *monitor) setDrillMode(mode string) {
 	m.drawDetail()
 }
 
+// action is one Day-2 action applicable to a selected resource.
+type action struct {
+	label, preview, auditAction    string
+	kind, namespace, name, command string                      // for the audit record
+	exec                           func() (string, int, error) // runs OFF the UI goroutine (Task 4)
+}
+
+// actionsFor returns the reversible Day-2 actions available for a resource.
+// Returns nil when the resource kind has no supported actions (packages, apps, services).
+func (m *monitor) actionsFor(dt drillTarget) []action {
+	switch dt.kind {
+	case "pods":
+		return []action{{
+			label: "Restart", auditAction: "restart-pod",
+			kind: dt.kind, namespace: dt.namespace, name: dt.name,
+			command: fmt.Sprintf("kubectl delete pod -n %s %s", dt.namespace, dt.name),
+			preview: fmt.Sprintf("Restart pod %s/%s?\n\nDeletes the pod; its controller recreates it.", dt.namespace, dt.name),
+			exec:    func() (string, int, error) { return m.res.DeletePod(dt.namespace, dt.name) },
+		}}
+	case "deployments", "statefulsets", "daemonsets":
+		return []action{{
+			label: "Rollout restart", auditAction: "rollout-restart",
+			kind: dt.kind, namespace: dt.namespace, name: dt.name,
+			command: fmt.Sprintf("kubectl rollout restart %s -n %s %s", dt.kind, dt.namespace, dt.name),
+			preview: fmt.Sprintf("Rollout-restart %s %s/%s?\n\nCycles its pods with a rolling update.", dt.kind, dt.namespace, dt.name),
+			exec:    func() (string, int, error) { return m.res.RolloutRestart(dt.kind, dt.namespace, dt.name) },
+		}}
+	case "nodes":
+		return []action{
+			{label: "Cordon", auditAction: "cordon", kind: dt.kind, name: dt.name,
+				command: fmt.Sprintf("kubectl cordon %s", dt.name),
+				preview: fmt.Sprintf("Cordon node %s?\n\nMarks it unschedulable (running pods keep running).", dt.name),
+				exec:    func() (string, int, error) { return m.res.SetCordon(dt.name, true) }},
+			{label: "Uncordon", auditAction: "uncordon", kind: dt.kind, name: dt.name,
+				command: fmt.Sprintf("kubectl uncordon %s", dt.name),
+				preview: fmt.Sprintf("Uncordon node %s?\n\nMarks it schedulable again.", dt.name),
+				exec:    func() (string, int, error) { return m.res.SetCordon(dt.name, false) }},
+		}
+	}
+	return nil
+}
+
+// openActions shows the action menu modal for the selected row's resource.
+// Does nothing if the resource kind has no supported actions.
+func (m *monitor) openActions(dt drillTarget) {
+	acts := m.actionsFor(dt)
+	if len(acts) == 0 {
+		return
+	}
+	labels := make([]string, 0, len(acts)+1)
+	for _, a := range acts {
+		labels = append(labels, a.label)
+	}
+	labels = append(labels, "Cancel")
+	m.modalActive = true
+	m.modal.SetText(fmt.Sprintf("Actions · %s/%s", dt.kind, dt.name)).
+		ClearButtons().AddButtons(labels).
+		SetDoneFunc(func(i int, label string) {
+			if label == "Cancel" || i < 0 || i >= len(acts) {
+				m.closeModal()
+				return
+			}
+			m.showConfirm(acts[i])
+		})
+	m.root.ShowPage("modal")
+	m.app.SetFocus(m.modal)
+}
+
+// showConfirm replaces the modal content with a confirm prompt for the chosen action.
+// Confirm is a no-op close in this task; Task 4 replaces it with executePending.
+func (m *monitor) showConfirm(a action) {
+	m.pending = a
+	m.modal.SetText(a.preview).
+		ClearButtons().AddButtons([]string{"Confirm", "Cancel"}).
+		SetDoneFunc(func(_ int, _ string) {
+			m.closeModal() // TASK 4: replace the Confirm branch with m.executePending()
+		})
+}
+
+// closeModal hides the overlay and returns focus to the main table.
+func (m *monitor) closeModal() {
+	m.modalActive = false
+	m.root.HidePage("modal")
+	m.app.SetFocus(m.main)
+}
+
 // detailFooter is the hotkey bar shown while drilled into a resource.
 func detailFooter(podLogs bool) string {
 	logs := ""
@@ -804,5 +920,6 @@ func footerText() string {
 		"[#FFFFFF::b]3[-:-:-] [#7C8694]nodes[-]   [#FFFFFF::b]4[-:-:-] [#7C8694]pods[-]   " +
 		"[#FFFFFF::b]5[-:-:-] [#7C8694]workloads[-]   [#FFFFFF::b]6[-:-:-] [#7C8694]services[-]   " +
 		"[#FFFFFF::b]Tab[-:-:-] [#7C8694]cycle[-]   [#FFFFFF::b]j/k[-:-:-] [#7C8694]move[-]   " +
+		"[#FFFFFF::b]a[-:-:-] [#7C8694]actions[-]   " +
 		"[#FFFFFF::b]:[-:-:-] [#7C8694]jump[-]   [#FFFFFF::b]q[-:-:-] [#7C8694]quit[-]"
 }
