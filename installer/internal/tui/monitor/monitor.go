@@ -335,7 +335,6 @@ type monitor struct {
 	drillMode string          // "describe" | "yaml" | "logs"
 	inDetail  bool            // true while the detail page is front
 	// action modal (Task 3)
-	modal       *tview.Modal // single reconfigurable modal; reused for menu + confirm
 	root        *tview.Pages // top-level pages: "main" (layout) + "modal" (overlay)
 	modalActive bool         // true while the modal overlay is visible
 	pending     action       // action selected in the menu, awaiting confirm (Task 4)
@@ -439,7 +438,7 @@ func (m *monitor) refresh() {
 		if view == "overview" {
 			in := m.fetchOverview(prom)
 			m.app.QueueUpdateDraw(func() {
-				if m.inDetail || m.view != view {
+				if m.inDetail || m.modalActive || m.view != view {
 					return
 				}
 				m.overviewTV.SetText(views.BuildOverview(in))
@@ -453,7 +452,7 @@ func (m *monitor) refresh() {
 		}
 		res := tv.fetch()
 		m.app.QueueUpdateDraw(func() {
-			if m.inDetail || m.view != view {
+			if m.inDetail || m.modalActive || m.view != view {
 				return
 			}
 			m.drawTable(res)
@@ -869,7 +868,6 @@ func (m *monitor) showModal(text string, buttons []string, done func(buttonIndex
 	mod := tview.NewModal().SetText(text)
 	mod.AddButtons(buttons)
 	mod.SetDoneFunc(done)
-	m.modal = mod
 	m.root.RemovePage("modal")
 	m.root.AddPage("modal", mod, true, true) // visible=true → shown over "main"
 	m.modalActive = true
