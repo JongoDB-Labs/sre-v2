@@ -406,7 +406,7 @@ func (m *monitor) refresh() {
 		if view == "overview" {
 			in := m.fetchOverview(prom)
 			m.app.QueueUpdateDraw(func() {
-				if m.view != view {
+				if m.inDetail || m.view != view {
 					return
 				}
 				m.overviewTV.SetText(views.BuildOverview(in))
@@ -420,7 +420,7 @@ func (m *monitor) refresh() {
 		}
 		res := tv.fetch()
 		m.app.QueueUpdateDraw(func() {
-			if m.view != view {
+			if m.inDetail || m.view != view {
 				return
 			}
 			m.drawTable(res)
