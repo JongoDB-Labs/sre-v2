@@ -16,6 +16,8 @@ type Inputs struct {
 	Nodes, Pods, Namespaces, Packages, FiringAlerts int
 	CPUPct, MemPct                                  float64
 	CPUSeries, MemSeries                            []float64
+	DiskPct, Load                                   float64
+	PodPhases                                       map[string]int
 	LayerHealth                                     [3]int // ok, warn, fail
 	AlertNames                                      []string
 	MetricsOK                                       bool
@@ -35,6 +37,9 @@ func BuildOverview(in Inputs) string {
 	if in.MetricsOK {
 		fmt.Fprintf(&b, "    CPU  %s   %s\n", widgets.Bar(in.CPUPct, 24), widgets.Spark(in.CPUSeries))
 		fmt.Fprintf(&b, "    MEM  %s   %s\n", widgets.Bar(in.MemPct, 24), widgets.Spark(in.MemSeries))
+		fmt.Fprintf(&b, "    DISK %s\n", widgets.Bar(in.DiskPct, 24))
+		fmt.Fprintf(&b, "    Load %.2f    Pods  %d running · %d pending · %d failed · %d done\n",
+			in.Load, in.PodPhases["Running"], in.PodPhases["Pending"], in.PodPhases["Failed"], in.PodPhases["Succeeded"])
 	} else {
 		b.WriteString("    [#7C8694]metrics unavailable (Prometheus unreachable)[-]\n")
 	}

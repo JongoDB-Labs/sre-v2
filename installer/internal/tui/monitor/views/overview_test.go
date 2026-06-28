@@ -38,3 +38,31 @@ func TestBuildOverview_CapsAlerts(t *testing.T) {
 		t.Fatalf("expected overflow line 'and 2 more' in output:\n%s", out)
 	}
 }
+
+func TestBuildOverview_Enriched(t *testing.T) {
+	in := Inputs{
+		Nodes: 1, Pods: 56, Namespaces: 22, Packages: 6,
+		CPUPct: 43, MemPct: 10, DiskPct: 27.6, Load: 0.43,
+		CPUSeries: []float64{5, 9, 12, 20, 43}, MemSeries: []float64{8, 9, 10, 10, 10},
+		PodPhases:   map[string]int{"Running": 44, "Succeeded": 12, "Pending": 0, "Failed": 0},
+		LayerHealth: [3]int{6, 0, 0}, MetricsOK: true,
+	}
+	out := BuildOverview(in)
+	for _, want := range []string{"DISK", "Load", "0.43", "44", "running"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("overview missing %q\n%s", want, out)
+		}
+	}
+	// a sparkline renders at least one block glyph from the CPU series
+	if !strings.ContainsAny(out, "▁▂▃▄▅▆▇█") {
+		t.Fatalf("overview missing sparkline glyphs\n%s", out)
+	}
+}
+
+func TestBuildOverview_DegradeNoEnrichment(t *testing.T) {
+	// metrics down → no DISK panel, no sparkline glyphs, no panic
+	out := BuildOverview(Inputs{Nodes: 1, Pods: 56, MetricsOK: false})
+	if strings.Contains(out, "DISK") || strings.ContainsAny(out, "▁▂▃▄▅▆▇█") {
+		t.Fatalf("degraded overview must omit enrichment panels\n%s", out)
+	}
+}
