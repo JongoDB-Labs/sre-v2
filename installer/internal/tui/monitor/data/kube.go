@@ -25,6 +25,7 @@ type Resources interface {
 	RolloutRestart(kind, namespace, name string) (string, int, error)
 	SetCordon(node string, cordon bool) (string, int, error)
 	Scale(kind, namespace, name string, replicas int) (string, int, error)
+	Delete(kind, namespace, name string) (string, int, error)
 }
 
 type execResources struct{}
@@ -346,4 +347,15 @@ func scaleArgs(kind, namespace, name string, replicas int) []string {
 // Scale sets a workload's replica count.
 func (execResources) Scale(kind, namespace, name string, replicas int) (string, int, error) {
 	return runAction(scaleArgs(kind, namespace, name, replicas))
+}
+
+// deleteArgs builds `kubectl delete <kind> -n <ns> <name>` (the generic delete used
+// by the destructive Delete action; deletePodArgs stays the pod-restart variant).
+func deleteArgs(kind, namespace, name string) []string {
+	return []string{"delete", kind, "-n", namespace, name}
+}
+
+// Delete removes a namespaced resource.
+func (execResources) Delete(kind, namespace, name string) (string, int, error) {
+	return runAction(deleteArgs(kind, namespace, name))
 }

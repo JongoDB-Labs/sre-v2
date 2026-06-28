@@ -143,3 +143,11 @@ func TestScaleArgs(t *testing.T) {
 		t.Fatalf("scaleArgs replicas=0: %v", got)
 	}
 }
+
+func TestDeleteArgs(t *testing.T) {
+	got := deleteArgs("deployments", "default", "smoke-target")
+	want := []string{"delete", "deployments", "-n", "default", "smoke-target"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("deleteArgs: got %v want %v", got, want)
+	}
+}
