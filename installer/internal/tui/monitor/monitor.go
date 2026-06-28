@@ -136,8 +136,10 @@ func Run(version string, state appcatalog.State) error {
 		"pods":      {fetch: m.fetchPods},
 		"workloads": {fetch: m.fetchWorkloads},
 		"services":  {fetch: m.fetchServices},
+		"alerts":    {fetch: m.fetchAlerts},
+		"falco":     {fetch: m.fetchFalco},
 	}
-	m.viewOrder = []string{"overview", "nodes", "pods", "workloads", "services", "packages", "apps"}
+	m.viewOrder = []string{"overview", "nodes", "pods", "workloads", "services", "alerts", "falco", "packages", "apps"}
 	m.view = "overview"
 	m.setHeader("OVERVIEW", 0) // initial header before the first fetch lands
 
@@ -205,6 +207,12 @@ func Run(version string, state appcatalog.State) error {
 			return nil
 		case '6':
 			m.setView("services")
+			return nil
+		case '7':
+			m.setView("alerts")
+			return nil
+		case '8':
+			m.setView("falco")
 			return nil
 		case 'a':
 			// Open the action menu for the selected row (table views only; not while
@@ -801,6 +809,65 @@ func (m *monitor) fetchServices() tableResult {
 	return res
 }
 
+// falco discovery constants (the UDS Core Falco daemonset).
+const (
+	falcoNS        = "falco"
+	falcoSelector  = "app.kubernetes.io/name=falco"
+	falcoContainer = "falco"
+)
+
+// sevCell colours a severity/priority: critical→red, warning→amber, else dim.
+func sevCell(s string) *tview.TableCell {
+	c := tview.NewTableCell(s + "  ")
+	switch strings.ToLower(s) {
+	case "critical", "emergency", "alert":
+		return c.SetTextColor(statusRed)
+	case "warning":
+		return c.SetTextColor(statusAmber)
+	default:
+		return c.SetTextColor(consoleDim)
+	}
+}
+
+func (m *monitor) fetchAlerts() tableResult {
+	if m.prom.Ref == "" {
+		return tableResult{title: "ALERTS", notice: "metrics unavailable (Prometheus unreachable)"}
+	}
+	samples, err := m.prom.Query(data.QFiringAlerts)
+	if err != nil {
+		return tableResult{title: "ALERTS", notice: "error: " + err.Error(), isError: true}
+	}
+	rows := data.AlertRows(samples)
+	res := tableResult{title: "ALERTS"}
+	if len(rows) == 0 {
+		res.notice = "no alerts firing"
+		return res
+	}
+	res.cols = []string{"ALERT", "SEVERITY", "NAMESPACE"}
+	for _, r := range rows {
+		res.rows = append(res.rows, []*tview.TableCell{cell(r.Name), sevCell(r.Severity), cell(r.Namespace)})
+	}
+	return res
+}
+
+func (m *monitor) fetchFalco() tableResult {
+	raw, err := m.res.LogsByLabel(falcoNS, falcoSelector, falcoContainer, 200)
+	if err != nil {
+		return tableResult{title: "FALCO", notice: "error: " + err.Error(), isError: true}
+	}
+	rows := data.FalcoRows(raw)
+	res := tableResult{title: "FALCO"}
+	if len(rows) == 0 {
+		res.notice = "no recent Falco events"
+		return res
+	}
+	res.cols = []string{"TIME", "PRIORITY", "RULE", "NAMESPACE", "POD"}
+	for _, r := range rows {
+		res.rows = append(res.rows, []*tview.TableCell{cell(r.Time), sevCell(r.Priority), cell(r.Rule), cell(r.Namespace), cell(r.Pod)})
+	}
+	return res
+}
+
 // liveCell renders the apps-view live flag.
 func liveCell(live bool) *tview.TableCell {
 	if live {
@@ -1061,6 +1128,7 @@ func footerText() string {
 		"[#FFFFFF::b]1[-:-:-] [#7C8694]packages[-]   [#FFFFFF::b]2[-:-:-] [#7C8694]apps[-]   " +
 		"[#FFFFFF::b]3[-:-:-] [#7C8694]nodes[-]   [#FFFFFF::b]4[-:-:-] [#7C8694]pods[-]   " +
 		"[#FFFFFF::b]5[-:-:-] [#7C8694]workloads[-]   [#FFFFFF::b]6[-:-:-] [#7C8694]services[-]   " +
+		"[#FFFFFF::b]7[-:-:-] [#7C8694]alerts[-]   [#FFFFFF::b]8[-:-:-] [#7C8694]falco[-]   " +
 		"[#FFFFFF::b]Tab[-:-:-] [#7C8694]cycle[-]   [#FFFFFF::b]j/k[-:-:-] [#7C8694]move[-]   " +
 		"[#FFFFFF::b]a[-:-:-] [#7C8694]actions[-]   " +
 		"[#FFFFFF::b]:[-:-:-] [#7C8694]jump[-]   [#FFFFFF::b]q[-:-:-] [#7C8694]quit[-]"
