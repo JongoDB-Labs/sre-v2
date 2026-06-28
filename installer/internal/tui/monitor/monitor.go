@@ -63,6 +63,10 @@ func Run(version string, state appcatalog.State) error {
 	footer.SetTextColor(consoleDim).SetBackgroundColor(consoleBg)
 	footer.SetText(footerText())
 
+	cmdBar := tview.NewInputField().SetLabel(" : ").SetFieldWidth(0)
+	cmdBar.SetLabelColor(tui.ColorSelectText).SetFieldTextColor(consoleText).
+		SetFieldBackgroundColor(consoleBg).SetBackgroundColor(consoleBg)
+
 	overviewTV := tview.NewTextView().SetDynamicColors(true).SetScrollable(true)
 	overviewTV.SetTextColor(consoleText).SetBackgroundColor(consoleBg)
 	overviewTV.SetText("  [#7C8694]loading…[-]")
@@ -76,10 +80,16 @@ func Run(version string, state appcatalog.State) error {
 	// (→ degraded) and the context shows "…" until then.
 	prom := data.Prom{Raw: data.NewRaw()}
 
+	// bottom swaps between the footer hint bar and the : command bar.
+	bottom := tview.NewPages().
+		AddPage("footer", footer, true, true).
+		AddPage("cmd", cmdBar, true, false)
+	bottom.SetBackgroundColor(consoleBg)
+
 	layout := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(header, 2, 0, false).
 		AddItem(main, 0, 1, true).
-		AddItem(footer, 1, 0, false)
+		AddItem(bottom, 1, 0, false)
 	layout.SetBackgroundColor(consoleBg)
 
 	m := &monitor{
@@ -88,6 +98,27 @@ func Run(version string, state appcatalog.State) error {
 		main: main, overviewTV: overviewTV, prom: prom,
 		res: data.NewResources(),
 	}
+	m.cmdBar = cmdBar
+
+	cmdBar.SetDoneFunc(func(key tcell.Key) {
+		if key == tcell.KeyEnter {
+			name := strings.TrimSpace(cmdBar.GetText())
+			cmdBar.SetText("")
+			bottom.SwitchToPage("footer")
+			m.app.SetFocus(m.main)
+			if name == "overview" {
+				m.setView("overview")
+			} else if _, ok := m.tableViews[name]; ok {
+				m.setView(name)
+			}
+			return
+		}
+		if key == tcell.KeyEscape {
+			cmdBar.SetText("")
+			bottom.SwitchToPage("footer")
+			m.app.SetFocus(m.main)
+		}
+	})
 	m.tableViews = map[string]tableView{
 		"packages":  {fetch: m.fetchPackages},
 		"apps":      {fetch: m.fetchApps},
@@ -101,6 +132,12 @@ func Run(version string, state appcatalog.State) error {
 	m.setHeader("OVERVIEW", 0) // initial header before the first fetch lands
 
 	app.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
+		// Pass-through guard: let the focused InputField receive all keystrokes
+		// so the global rune hotkeys don't intercept characters being typed in
+		// the command bar (e.g. typing "pods" would otherwise fire hotkey 'p').
+		if m.app.GetFocus() == m.cmdBar {
+			return ev
+		}
 		switch ev.Rune() {
 		case '0', 'o':
 			m.setView("overview")
@@ -122,6 +159,10 @@ func Run(version string, state appcatalog.State) error {
 			return nil
 		case '6':
 			m.setView("services")
+			return nil
+		case ':':
+			bottom.SwitchToPage("cmd")
+			m.app.SetFocus(m.cmdBar)
 			return nil
 		case 'q':
 			app.Stop()
@@ -209,7 +250,8 @@ type monitor struct {
 	main       *tview.Pages
 	overviewTV *tview.TextView
 	prom       data.Prom
-	res        data.Resources // kubectl resource fetcher (bounded 4s per call)
+	res        data.Resources    // kubectl resource fetcher (bounded 4s per call)
+	cmdBar     *tview.InputField // : command bar (hidden behind footer when idle)
 }
 
 // setView switches the active view immediately (page + selection, both cheap) and
@@ -583,5 +625,6 @@ func footerText() string {
 		"[#FFFFFF::b]1[-:-:-] [#7C8694]packages[-]   [#FFFFFF::b]2[-:-:-] [#7C8694]apps[-]   " +
 		"[#FFFFFF::b]3[-:-:-] [#7C8694]nodes[-]   [#FFFFFF::b]4[-:-:-] [#7C8694]pods[-]   " +
 		"[#FFFFFF::b]5[-:-:-] [#7C8694]workloads[-]   [#FFFFFF::b]6[-:-:-] [#7C8694]services[-]   " +
-		"[#FFFFFF::b]Tab[-:-:-] [#7C8694]cycle[-]   [#FFFFFF::b]j/k[-:-:-] [#7C8694]move[-]   [#FFFFFF::b]q[-:-:-] [#7C8694]quit[-]"
+		"[#FFFFFF::b]Tab[-:-:-] [#7C8694]cycle[-]   [#FFFFFF::b]j/k[-:-:-] [#7C8694]move[-]   " +
+		"[#FFFFFF::b]:[-:-:-] [#7C8694]jump[-]   [#FFFFFF::b]q[-:-:-] [#7C8694]quit[-]"
 }
