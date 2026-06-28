@@ -904,6 +904,7 @@ func (m *monitor) showConfirm(a action) {
 			}
 			m.closeModal()
 		})
+	m.app.SetFocus(m.modal)
 }
 
 // closeModal hides the overlay and returns focus to the main table.
