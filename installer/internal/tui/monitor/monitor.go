@@ -302,11 +302,8 @@ func Run(version string, state appcatalog.State) error {
 	}()
 	defer close(stop)
 
-	modal := tview.NewModal()
-	m.modal = modal
 	root := tview.NewPages().
-		AddPage("main", layout, true, true).
-		AddPage("modal", modal, true, false) // hidden; shown over main during an action
+		AddPage("main", layout, true, true)
 	m.root = root
 
 	if err := app.SetRoot(root, true).Run(); err != nil {
@@ -865,6 +862,20 @@ func (m *monitor) actionsFor(dt drillTarget) []action {
 	return nil
 }
 
+// showModal swaps the overlay to a FRESH tview.Modal. A fresh modal always
+// focuses its first button, avoiding tview's focus-index carry-over when one
+// modal is reconfigured in place (which made Enter hit the wrong button).
+func (m *monitor) showModal(text string, buttons []string, done func(buttonIndex int, buttonLabel string)) {
+	mod := tview.NewModal().SetText(text)
+	mod.AddButtons(buttons)
+	mod.SetDoneFunc(done)
+	m.modal = mod
+	m.root.RemovePage("modal")
+	m.root.AddPage("modal", mod, true, true) // visible=true → shown over "main"
+	m.modalActive = true
+	m.app.SetFocus(mod)
+}
+
 // openActions shows the action menu modal for the selected row's resource.
 // Does nothing if the resource kind has no supported actions.
 func (m *monitor) openActions(dt drillTarget) {
@@ -877,40 +888,32 @@ func (m *monitor) openActions(dt drillTarget) {
 		labels = append(labels, a.label)
 	}
 	labels = append(labels, "Cancel")
-	m.modalActive = true
-	m.modal.SetText(fmt.Sprintf("Actions · %s/%s", dt.kind, dt.name)).
-		ClearButtons().AddButtons(labels).
-		SetDoneFunc(func(i int, label string) {
-			if label == "Cancel" || i < 0 || i >= len(acts) {
-				m.closeModal()
-				return
-			}
-			m.showConfirm(acts[i])
-		})
-	m.root.ShowPage("modal")
-	m.app.SetFocus(m.modal)
+	m.showModal(fmt.Sprintf("Actions · %s/%s", dt.kind, dt.name), labels, func(i int, label string) {
+		if label == "Cancel" || i < 0 || i >= len(acts) {
+			m.closeModal()
+			return
+		}
+		m.showConfirm(acts[i])
+	})
 }
 
-// showConfirm replaces the modal content with a confirm prompt for the chosen action.
-// Confirm calls executePending (off the UI goroutine); any other button closes the modal.
+// showConfirm replaces the modal with a fresh confirm prompt for the chosen action.
+// Confirm calls executePending (off the UI goroutine); Cancel closes the modal.
 func (m *monitor) showConfirm(a action) {
 	m.pending = a
-	m.modal.SetText(a.preview).
-		ClearButtons().AddButtons([]string{"Confirm", "Cancel"}).
-		SetDoneFunc(func(_ int, label string) {
-			if label == "Confirm" {
-				m.executePending()
-				return
-			}
-			m.closeModal()
-		})
-	m.app.SetFocus(m.modal)
+	m.showModal(a.preview, []string{"Confirm", "Cancel"}, func(_ int, label string) {
+		if label == "Confirm" {
+			m.executePending()
+			return
+		}
+		m.closeModal()
+	})
 }
 
-// closeModal hides the overlay and returns focus to the main table.
+// closeModal removes the overlay and returns focus to the main table.
 func (m *monitor) closeModal() {
 	m.modalActive = false
-	m.root.HidePage("modal")
+	m.root.RemovePage("modal")
 	m.app.SetFocus(m.main)
 }
 
@@ -919,7 +922,7 @@ func (m *monitor) closeModal() {
 // mutation never runs on the UI goroutine; only the result draw is marshalled back.
 func (m *monitor) executePending() {
 	a := m.pending
-	m.modal.SetText(a.preview + "\n\nrunning…").ClearButtons().AddButtons([]string{"…"})
+	m.showModal(a.preview+"\n\nrunning…", []string{"…"}, func(int, string) {})
 	go func() {
 		out, code, err := a.exec()
 		entry := data.AuditEntry{
@@ -947,14 +950,10 @@ func (m *monitor) executePending() {
 
 // showResult shows the action result; OK closes the overlay and refreshes the view.
 func (m *monitor) showResult(title, body string) {
-	m.modal.SetText(title + "\n\n" + body).
-		ClearButtons().AddButtons([]string{"OK"}).
-		SetDoneFunc(func(int, string) {
-			m.closeModal()
-			m.refresh()
-		})
-	m.root.ShowPage("modal")
-	m.app.SetFocus(m.modal)
+	m.showModal(title+"\n\n"+body, []string{"OK"}, func(int, string) {
+		m.closeModal()
+		m.refresh()
+	})
 }
 
 // detailFooter is the hotkey bar shown while drilled into a resource.
