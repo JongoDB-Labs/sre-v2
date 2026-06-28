@@ -106,7 +106,7 @@ func PodRows(raw []byte) ([]PodRow, error) {
 				NodeName string `json:"nodeName"`
 			} `json:"spec"`
 			Status struct {
-				Phase            string `json:"phase"`
+				Phase             string `json:"phase"`
 				ContainerStatuses []struct {
 					Ready        bool `json:"ready"`
 					RestartCount int  `json:"restartCount"`
@@ -128,8 +128,8 @@ func PodRows(raw []byte) ([]PodRow, error) {
 		}
 		rows = append(rows, PodRow{
 			Namespace: it.Metadata.Namespace, Name: it.Metadata.Name,
-			Ready:    fmt.Sprintf("%d/%d", ready, len(it.Status.ContainerStatuses)),
-			Status:   it.Status.Phase, Restarts: restarts, Node: it.Spec.NodeName,
+			Ready:  fmt.Sprintf("%d/%d", ready, len(it.Status.ContainerStatuses)),
+			Status: it.Status.Phase, Restarts: restarts, Node: it.Spec.NodeName,
 		})
 	}
 	return rows, nil
@@ -171,6 +171,44 @@ func WorkloadRows(raw []byte, kind string) ([]WorkloadRow, error) {
 		rows = append(rows, WorkloadRow{
 			Namespace: it.Metadata.Namespace, Kind: kind, Name: it.Metadata.Name,
 			Ready: fmt.Sprintf("%d/%d", ready, desired),
+		})
+	}
+	return rows, nil
+}
+
+// ServiceRow is one row of the services view.
+type ServiceRow struct {
+	Namespace, Name, Type, Ports string
+}
+
+// ServiceRows parses `kubectl get services -A -o json`.
+func ServiceRows(raw []byte) ([]ServiceRow, error) {
+	var list struct {
+		Items []struct {
+			Metadata struct {
+				Namespace string `json:"namespace"`
+				Name      string `json:"name"`
+			} `json:"metadata"`
+			Spec struct {
+				Type  string `json:"type"`
+				Ports []struct {
+					Port int `json:"port"`
+				} `json:"ports"`
+			} `json:"spec"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &list); err != nil {
+		return nil, fmt.Errorf("data: parse services json: %w", err)
+	}
+	rows := make([]ServiceRow, 0, len(list.Items))
+	for _, it := range list.Items {
+		ports := make([]string, 0, len(it.Spec.Ports))
+		for _, p := range it.Spec.Ports {
+			ports = append(ports, fmt.Sprintf("%d", p.Port))
+		}
+		rows = append(rows, ServiceRow{
+			Namespace: it.Metadata.Namespace, Name: it.Metadata.Name,
+			Type: it.Spec.Type, Ports: strings.Join(ports, ","),
 		})
 	}
 	return rows, nil

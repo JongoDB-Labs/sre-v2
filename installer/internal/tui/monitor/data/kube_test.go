@@ -69,3 +69,21 @@ func TestWorkloadRows_DaemonSet(t *testing.T) {
 		t.Fatalf("got %+v, want %+v", got, want)
 	}
 }
+
+const svcJSON = `{"items":[
+ {"metadata":{"namespace":"authservice","name":"authservice"},"spec":{"type":"ClusterIP","ports":[{"port":10003}]}},
+ {"metadata":{"namespace":"istio","name":"gw"},"spec":{"type":"LoadBalancer","ports":[{"port":80},{"port":443}]}}]}`
+
+func TestServiceRows(t *testing.T) {
+	got, err := ServiceRows([]byte(svcJSON))
+	if err != nil {
+		t.Fatalf("ServiceRows: %v", err)
+	}
+	want := []ServiceRow{
+		{Namespace: "authservice", Name: "authservice", Type: "ClusterIP", Ports: "10003"},
+		{Namespace: "istio", Name: "gw", Type: "LoadBalancer", Ports: "80,443"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+}
