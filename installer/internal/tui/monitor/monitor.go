@@ -15,14 +15,12 @@ import (
 	"github.com/rivo/tview"
 )
 
-// viewKind selects which dataset the table shows.
-type viewKind int
-
-const (
-	viewOverview viewKind = iota
-	viewPackages
-	viewApps
-)
+// tableView is a registered table screen. fetch is called off the UI goroutine
+// and returns the rows to draw; the returned tableResult carries its own title
+// and columns (set by fetchPackages/fetchApps), so no redundant fields here.
+type tableView struct {
+	fetch func() tableResult
+}
 
 // refreshInterval is how often the background loop re-polls the cluster.
 const refreshInterval = 5 * time.Second
@@ -86,21 +84,27 @@ func Run(version string, state appcatalog.State) error {
 
 	m := &monitor{
 		app: app, state: state, table: table, header: header,
-		version: version, ctx: "…", view: viewOverview,
+		version: version, ctx: "…",
 		main: main, overviewTV: overviewTV, prom: prom,
 	}
+	m.tableViews = map[string]tableView{
+		"packages": {fetch: m.fetchPackages},
+		"apps":     {fetch: m.fetchApps},
+	}
+	m.viewOrder = []string{"overview", "packages", "apps"}
+	m.view = "overview"
 	m.setHeader("OVERVIEW", 0) // initial header before the first fetch lands
 
 	app.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
 		switch ev.Rune() {
 		case '0', 'o':
-			m.setView(viewOverview)
+			m.setView("overview")
 			return nil
 		case '1':
-			m.setView(viewPackages)
+			m.setView("packages")
 			return nil
 		case '2':
-			m.setView(viewApps)
+			m.setView("apps")
 			return nil
 		case 'q':
 			app.Stop()
@@ -112,15 +116,15 @@ func Run(version string, state appcatalog.State) error {
 		}
 		switch ev.Key() {
 		case tcell.KeyTab:
-			// Cycle overview → packages → apps → overview.
-			switch m.view {
-			case viewOverview:
-				m.setView(viewPackages)
-			case viewPackages:
-				m.setView(viewApps)
-			default:
-				m.setView(viewOverview)
+			// Cycle through m.viewOrder (overview → packages → apps → overview).
+			cur := 0
+			for i, name := range m.viewOrder {
+				if name == m.view {
+					cur = i
+					break
+				}
 			}
+			m.setView(m.viewOrder[(cur+1)%len(m.viewOrder)])
 			return nil
 		case tcell.KeyEscape:
 			app.Stop()
@@ -182,7 +186,9 @@ type monitor struct {
 	header     *tview.TextView
 	version    string
 	ctx        string
-	view       viewKind
+	view       string               // "overview" or a key in tableViews
+	tableViews map[string]tableView // registry of table screens
+	viewOrder  []string             // ordered keys for Tab cycling (overview first)
 	main       *tview.Pages
 	overviewTV *tview.TextView
 	prom       data.Prom
@@ -190,10 +196,16 @@ type monitor struct {
 
 // setView switches the active view immediately (page + selection, both cheap) and
 // then kicks off an async refresh of its content. The page swap is instant so view
-// switching never waits on cluster I/O.
-func (m *monitor) setView(v viewKind) {
-	m.view = v
-	if v == viewOverview {
+// switching never waits on cluster I/O. Unknown names (not "overview" and not in
+// tableViews) are silently ignored.
+func (m *monitor) setView(name string) {
+	if name != "overview" {
+		if _, ok := m.tableViews[name]; !ok {
+			return
+		}
+	}
+	m.view = name
+	if name == "overview" {
 		m.main.SwitchToPage("overview")
 	} else {
 		m.main.SwitchToPage("table")
@@ -209,8 +221,7 @@ func (m *monitor) refresh() {
 	view := m.view
 	prom := m.prom // captured on the UI goroutine; the fetch reads this copy
 	go func() {
-		switch view {
-		case viewOverview:
+		if view == "overview" {
 			in := m.fetchOverview(prom)
 			m.app.QueueUpdateDraw(func() {
 				if m.view != view {
@@ -219,23 +230,19 @@ func (m *monitor) refresh() {
 				m.overviewTV.SetText(views.BuildOverview(in))
 				m.setHeader("OVERVIEW", in.Packages)
 			})
-		case viewApps:
-			res := m.fetchApps()
-			m.app.QueueUpdateDraw(func() {
-				if m.view != view {
-					return
-				}
-				m.drawTable(res)
-			})
-		default:
-			res := m.fetchPackages()
-			m.app.QueueUpdateDraw(func() {
-				if m.view != view {
-					return
-				}
-				m.drawTable(res)
-			})
+			return
 		}
+		tv, ok := m.tableViews[view]
+		if !ok {
+			return
+		}
+		res := tv.fetch()
+		m.app.QueueUpdateDraw(func() {
+			if m.view != view {
+				return
+			}
+			m.drawTable(res)
+		})
 	}()
 }
 
