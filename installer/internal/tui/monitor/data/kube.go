@@ -86,3 +86,51 @@ func NodeRows(raw []byte) ([]NodeRow, error) {
 	}
 	return rows, nil
 }
+
+// PodRow is one row of the pods view.
+type PodRow struct {
+	Namespace, Name, Ready, Status string
+	Restarts                       int
+	Node                           string
+}
+
+// PodRows parses `kubectl get pods -A -o json`.
+func PodRows(raw []byte) ([]PodRow, error) {
+	var list struct {
+		Items []struct {
+			Metadata struct {
+				Namespace string `json:"namespace"`
+				Name      string `json:"name"`
+			} `json:"metadata"`
+			Spec struct {
+				NodeName string `json:"nodeName"`
+			} `json:"spec"`
+			Status struct {
+				Phase            string `json:"phase"`
+				ContainerStatuses []struct {
+					Ready        bool `json:"ready"`
+					RestartCount int  `json:"restartCount"`
+				} `json:"containerStatuses"`
+			} `json:"status"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &list); err != nil {
+		return nil, fmt.Errorf("data: parse pods json: %w", err)
+	}
+	rows := make([]PodRow, 0, len(list.Items))
+	for _, it := range list.Items {
+		ready, restarts := 0, 0
+		for _, cs := range it.Status.ContainerStatuses {
+			if cs.Ready {
+				ready++
+			}
+			restarts += cs.RestartCount
+		}
+		rows = append(rows, PodRow{
+			Namespace: it.Metadata.Namespace, Name: it.Metadata.Name,
+			Ready:    fmt.Sprintf("%d/%d", ready, len(it.Status.ContainerStatuses)),
+			Status:   it.Status.Phase, Restarts: restarts, Node: it.Spec.NodeName,
+		})
+	}
+	return rows, nil
+}

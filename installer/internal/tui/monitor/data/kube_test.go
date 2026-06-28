@@ -27,3 +27,23 @@ func TestNodeRows_NotReady(t *testing.T) {
 		t.Fatalf("got %+v", got)
 	}
 }
+
+const podsJSON = `{"items":[
+ {"metadata":{"namespace":"authservice","name":"authservice-74b485b56-g2xdw"},"spec":{"nodeName":"cosmos-k8s"},
+  "status":{"phase":"Running","containerStatuses":[{"ready":true,"restartCount":0}]}},
+ {"metadata":{"namespace":"cosmos","name":"cosmos-pg-0"},"spec":{"nodeName":"cosmos-k8s"},
+  "status":{"phase":"Running","containerStatuses":[{"ready":true,"restartCount":2},{"ready":false,"restartCount":1}]}}]}`
+
+func TestPodRows(t *testing.T) {
+	got, err := PodRows([]byte(podsJSON))
+	if err != nil {
+		t.Fatalf("PodRows: %v", err)
+	}
+	want := []PodRow{
+		{Namespace: "authservice", Name: "authservice-74b485b56-g2xdw", Ready: "1/1", Status: "Running", Restarts: 0, Node: "cosmos-k8s"},
+		{Namespace: "cosmos", Name: "cosmos-pg-0", Ready: "1/2", Status: "Running", Restarts: 3, Node: "cosmos-k8s"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+}
