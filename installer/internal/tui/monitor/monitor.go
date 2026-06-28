@@ -102,7 +102,8 @@ func Run(version string, state appcatalog.State) error {
 		app: app, state: state, table: table, header: header,
 		version: version, ctx: "…",
 		main: main, overviewTV: overviewTV, prom: prom,
-		res: data.NewResources(),
+		res:     data.NewResources(),
+		auditor: data.NewFileAuditor(data.AuditPath()),
 	}
 	m.cmdBar = cmdBar
 	m.detail = detail
@@ -274,9 +275,11 @@ func Run(version string, state appcatalog.State) error {
 		if cerr != nil || cx == "" {
 			cx = "unknown"
 		}
+		actor := data.CurrentActor()
 		app.QueueUpdate(func() {
 			m.prom.Ref = ref
 			m.ctx = cx
+			m.actor = actor
 			m.refresh()
 		})
 	}()
@@ -339,6 +342,9 @@ type monitor struct {
 	root        *tview.Pages // top-level pages: "main" (layout) + "modal" (overlay)
 	modalActive bool         // true while the modal overlay is visible
 	pending     action       // action selected in the menu, awaiting confirm (Task 4)
+	// audit (Task 4)
+	auditor data.Auditor // writes NDJSON audit entries to disk
+	actor   string       // identity of the operator (discovered off-UI at startup)
 }
 
 // setView switches the active view immediately (page + selection, both cheap) and
@@ -426,9 +432,9 @@ func (m *monitor) closeDetail() {
 // via QueueUpdateDraw. It must be called on the UI goroutine (it reads m.view);
 // the fetch itself runs off it, so cluster I/O never blocks input.
 func (m *monitor) refresh() {
-	if m.inDetail {
-		return // the detail pane owns the header/screen while drilled; don't let the
-		// background table refresh clobber the detail title or waste a fetch
+	if m.inDetail || m.modalActive {
+		return // the detail pane or action modal owns the screen; don't clobber the
+		// overlay title or waste a fetch while the user is reviewing an action
 	}
 	view := m.view
 	prom := m.prom // captured on the UI goroutine; the fetch reads this copy
@@ -886,13 +892,17 @@ func (m *monitor) openActions(dt drillTarget) {
 }
 
 // showConfirm replaces the modal content with a confirm prompt for the chosen action.
-// Confirm is a no-op close in this task; Task 4 replaces it with executePending.
+// Confirm calls executePending (off the UI goroutine); any other button closes the modal.
 func (m *monitor) showConfirm(a action) {
 	m.pending = a
 	m.modal.SetText(a.preview).
 		ClearButtons().AddButtons([]string{"Confirm", "Cancel"}).
-		SetDoneFunc(func(_ int, _ string) {
-			m.closeModal() // TASK 4: replace the Confirm branch with m.executePending()
+		SetDoneFunc(func(_ int, label string) {
+			if label == "Confirm" {
+				m.executePending()
+				return
+			}
+			m.closeModal()
 		})
 }
 
@@ -901,6 +911,49 @@ func (m *monitor) closeModal() {
 	m.modalActive = false
 	m.root.HidePage("modal")
 	m.app.SetFocus(m.main)
+}
+
+// executePending runs the pending action OFF the UI goroutine, records the audit
+// entry (success or failure), then shows the result. Anti-freeze: the kubectl
+// mutation never runs on the UI goroutine; only the result draw is marshalled back.
+func (m *monitor) executePending() {
+	a := m.pending
+	m.modal.SetText(a.preview + "\n\nrunning…").ClearButtons().AddButtons([]string{"…"})
+	go func() {
+		out, code, err := a.exec()
+		entry := data.AuditEntry{
+			Time:      time.Now().UTC().Format(time.RFC3339),
+			Actor:     m.actor,
+			Action:    a.auditAction,
+			Kind:      a.kind,
+			Namespace: a.namespace,
+			Name:      a.name,
+			Command:   a.command,
+			ExitCode:  code,
+			OK:        err == nil,
+		}
+		_ = m.auditor.Record(entry)
+		title, body := "✓ "+a.auditAction, strings.TrimSpace(out)
+		if err != nil {
+			title = "✗ " + a.auditAction + " failed"
+			if body == "" {
+				body = err.Error()
+			}
+		}
+		m.app.QueueUpdateDraw(func() { m.showResult(title, body) })
+	}()
+}
+
+// showResult shows the action result; OK closes the overlay and refreshes the view.
+func (m *monitor) showResult(title, body string) {
+	m.modal.SetText(title + "\n\n" + body).
+		ClearButtons().AddButtons([]string{"OK"}).
+		SetDoneFunc(func(int, string) {
+			m.closeModal()
+			m.refresh()
+		})
+	m.root.ShowPage("modal")
+	m.app.SetFocus(m.modal)
 }
 
 // detailFooter is the hotkey bar shown while drilled into a resource.
