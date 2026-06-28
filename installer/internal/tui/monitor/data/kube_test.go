@@ -93,3 +93,27 @@ func TestServiceRows(t *testing.T) {
 		t.Fatalf("got %+v, want %+v", got, want)
 	}
 }
+
+func TestDescribeArgs(t *testing.T) {
+	if got := describeArgs("pods", "cosmos", "cosmos-abc"); !reflect.DeepEqual(got, []string{"describe", "pods", "-n", "cosmos", "cosmos-abc"}) {
+		t.Fatalf("namespaced: got %v", got)
+	}
+	if got := describeArgs("nodes", "", "cosmos-k8s"); !reflect.DeepEqual(got, []string{"describe", "nodes", "cosmos-k8s"}) {
+		t.Fatalf("cluster-scoped: got %v", got)
+	}
+}
+
+func TestYamlArgs(t *testing.T) {
+	if got := yamlArgs("services", "istio", "gw"); !reflect.DeepEqual(got, []string{"get", "services", "-n", "istio", "gw", "-o", "yaml"}) {
+		t.Fatalf("namespaced: got %v", got)
+	}
+	if got := yamlArgs("nodes", "", "cosmos-k8s"); !reflect.DeepEqual(got, []string{"get", "nodes", "cosmos-k8s", "-o", "yaml"}) {
+		t.Fatalf("cluster-scoped: got %v", got)
+	}
+}
+
+func TestLogsArgs(t *testing.T) {
+	if got := logsArgs("cosmos", "cosmos-abc", 200); !reflect.DeepEqual(got, []string{"logs", "-n", "cosmos", "cosmos-abc", "--tail", "200"}) {
+		t.Fatalf("got %v", got)
+	}
+}

@@ -14,9 +14,12 @@ import (
 // the (background) fetch indefinitely.
 const resourcesTimeout = 4 * time.Second
 
-// Resources runs `kubectl get <args...> -o json`. Tests inject a fake.
+// Resources runs read-only kubectl against the cluster. Tests inject a fake.
 type Resources interface {
 	Get(args ...string) ([]byte, error)
+	Describe(kind, namespace, name string) (string, error)
+	Yaml(kind, namespace, name string) (string, error)
+	Logs(namespace, name string, tail int) (string, error)
 }
 
 type execResources struct{}
@@ -212,4 +215,66 @@ func ServiceRows(raw []byte) ([]ServiceRow, error) {
 		})
 	}
 	return rows, nil
+}
+
+// detailTimeout bounds describe/yaml/logs shell-outs (slightly longer than the
+// list timeout: describe and a tailed log can be a touch slower than a get).
+const detailTimeout = 8 * time.Second
+
+// logsTailLines is how many trailing log lines the detail pane fetches.
+const logsTailLines = 200
+
+// describeArgs builds `kubectl describe <kind> [-n ns] <name>`. A cluster-scoped
+// resource (node) has ns == "" and omits the namespace flag.
+func describeArgs(kind, namespace, name string) []string {
+	args := []string{"describe", kind}
+	if namespace != "" {
+		args = append(args, "-n", namespace)
+	}
+	return append(args, name)
+}
+
+// yamlArgs builds `kubectl get <kind> [-n ns] <name> -o yaml`.
+func yamlArgs(kind, namespace, name string) []string {
+	args := []string{"get", kind}
+	if namespace != "" {
+		args = append(args, "-n", namespace)
+	}
+	return append(args, name, "-o", "yaml")
+}
+
+// logsArgs builds `kubectl logs -n <ns> <name> --tail <tail>` (pods only).
+func logsArgs(namespace, name string, tail int) []string {
+	args := []string{"logs"}
+	if namespace != "" {
+		args = append(args, "-n", namespace)
+	}
+	return append(args, name, "--tail", fmt.Sprintf("%d", tail))
+}
+
+// runDetail runs `kubectl <args...>` bounded by detailTimeout, returning combined
+// output (stderr is informative on a describe/logs failure).
+func runDetail(args []string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), detailTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "kubectl", args...).CombinedOutput()
+	if err != nil {
+		return string(out), fmt.Errorf("kubectl %s: %w", strings.Join(args, " "), err)
+	}
+	return string(out), nil
+}
+
+// Describe returns `kubectl describe` text for a resource.
+func (execResources) Describe(kind, namespace, name string) (string, error) {
+	return runDetail(describeArgs(kind, namespace, name))
+}
+
+// Yaml returns the resource's manifest via `kubectl get -o yaml`.
+func (execResources) Yaml(kind, namespace, name string) (string, error) {
+	return runDetail(yamlArgs(kind, namespace, name))
+}
+
+// Logs returns the last `tail` log lines of a pod.
+func (execResources) Logs(namespace, name string, tail int) (string, error) {
+	return runDetail(logsArgs(namespace, name, tail))
 }
