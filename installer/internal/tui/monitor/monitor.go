@@ -86,12 +86,17 @@ func Run(version string, state appcatalog.State) error {
 		app: app, state: state, table: table, header: header,
 		version: version, ctx: "…",
 		main: main, overviewTV: overviewTV, prom: prom,
+		res: data.NewResources(),
 	}
 	m.tableViews = map[string]tableView{
-		"packages": {fetch: m.fetchPackages},
-		"apps":     {fetch: m.fetchApps},
+		"packages":  {fetch: m.fetchPackages},
+		"apps":      {fetch: m.fetchApps},
+		"nodes":     {fetch: m.fetchNodes},
+		"pods":      {fetch: m.fetchPods},
+		"workloads": {fetch: m.fetchWorkloads},
+		"services":  {fetch: m.fetchServices},
 	}
-	m.viewOrder = []string{"overview", "packages", "apps"}
+	m.viewOrder = []string{"overview", "nodes", "pods", "workloads", "services", "packages", "apps"}
 	m.view = "overview"
 	m.setHeader("OVERVIEW", 0) // initial header before the first fetch lands
 
@@ -105,6 +110,18 @@ func Run(version string, state appcatalog.State) error {
 			return nil
 		case '2':
 			m.setView("apps")
+			return nil
+		case '3':
+			m.setView("nodes")
+			return nil
+		case '4':
+			m.setView("pods")
+			return nil
+		case '5':
+			m.setView("workloads")
+			return nil
+		case '6':
+			m.setView("services")
 			return nil
 		case 'q':
 			app.Stop()
@@ -192,6 +209,7 @@ type monitor struct {
 	main       *tview.Pages
 	overviewTV *tview.TextView
 	prom       data.Prom
+	res        data.Resources // kubectl resource fetcher (bounded 4s per call)
 }
 
 // setView switches the active view immediately (page + selection, both cheap) and
@@ -447,6 +465,110 @@ func phaseCell(phase string) *tview.TableCell {
 	}
 }
 
+// statusCell colours a status string: Ready/Running green, else amber.
+func statusCell(s string) *tview.TableCell {
+	c := tview.NewTableCell(s + "  ")
+	if s == "Ready" || s == "Running" {
+		return c.SetTextColor(statusGreen)
+	}
+	return c.SetTextColor(statusAmber)
+}
+
+// fetchNodes builds the nodes table (off the UI goroutine).
+func (m *monitor) fetchNodes() tableResult {
+	raw, err := m.res.Get("nodes")
+	if err != nil {
+		return tableResult{title: "NODES", notice: "error: " + err.Error(), isError: true}
+	}
+	rows, err := data.NodeRows(raw)
+	if err != nil {
+		return tableResult{title: "NODES", notice: "error: " + err.Error(), isError: true}
+	}
+	res := tableResult{title: "NODES"}
+	if len(rows) == 0 {
+		res.notice = "no nodes"
+		return res
+	}
+	res.cols = []string{"NAME", "ROLES", "STATUS", "VERSION"}
+	for _, r := range rows {
+		res.rows = append(res.rows, []*tview.TableCell{cell(r.Name), cell(r.Roles), statusCell(r.Status), cell(r.Version)})
+	}
+	return res
+}
+
+// fetchPods builds the pods table (off the UI goroutine).
+func (m *monitor) fetchPods() tableResult {
+	raw, err := m.res.Get("pods", "-A")
+	if err != nil {
+		return tableResult{title: "PODS", notice: "error: " + err.Error(), isError: true}
+	}
+	rows, err := data.PodRows(raw)
+	if err != nil {
+		return tableResult{title: "PODS", notice: "error: " + err.Error(), isError: true}
+	}
+	res := tableResult{title: "PODS"}
+	if len(rows) == 0 {
+		res.notice = "no pods"
+		return res
+	}
+	res.cols = []string{"NAMESPACE", "NAME", "READY", "STATUS", "RESTARTS", "NODE"}
+	for _, r := range rows {
+		res.rows = append(res.rows, []*tview.TableCell{
+			cell(r.Namespace), cell(r.Name), cell(r.Ready), statusCell(r.Status), cell(fmt.Sprintf("%d", r.Restarts)), cell(r.Node),
+		})
+	}
+	return res
+}
+
+// fetchWorkloads builds the workloads table (deployments + statefulsets + daemonsets, off the UI goroutine).
+func (m *monitor) fetchWorkloads() tableResult {
+	res := tableResult{title: "WORKLOADS"}
+	specs := []struct{ arg, kind string }{{"deployments", "Deployment"}, {"statefulsets", "StatefulSet"}, {"daemonsets", "DaemonSet"}}
+	var all []data.WorkloadRow
+	for _, s := range specs {
+		raw, err := m.res.Get(s.arg, "-A")
+		if err != nil {
+			return tableResult{title: "WORKLOADS", notice: "error: " + err.Error(), isError: true}
+		}
+		rows, err := data.WorkloadRows(raw, s.kind)
+		if err != nil {
+			return tableResult{title: "WORKLOADS", notice: "error: " + err.Error(), isError: true}
+		}
+		all = append(all, rows...)
+	}
+	if len(all) == 0 {
+		res.notice = "no workloads"
+		return res
+	}
+	res.cols = []string{"NAMESPACE", "KIND", "NAME", "READY"}
+	for _, r := range all {
+		res.rows = append(res.rows, []*tview.TableCell{cell(r.Namespace), cell(r.Kind), cell(r.Name), cell(r.Ready)})
+	}
+	return res
+}
+
+// fetchServices builds the services table (off the UI goroutine).
+func (m *monitor) fetchServices() tableResult {
+	raw, err := m.res.Get("services", "-A")
+	if err != nil {
+		return tableResult{title: "SERVICES", notice: "error: " + err.Error(), isError: true}
+	}
+	rows, err := data.ServiceRows(raw)
+	if err != nil {
+		return tableResult{title: "SERVICES", notice: "error: " + err.Error(), isError: true}
+	}
+	res := tableResult{title: "SERVICES"}
+	if len(rows) == 0 {
+		res.notice = "no services"
+		return res
+	}
+	res.cols = []string{"NAMESPACE", "NAME", "TYPE", "PORTS"}
+	for _, r := range rows {
+		res.rows = append(res.rows, []*tview.TableCell{cell(r.Namespace), cell(r.Name), cell(r.Type), cell(r.Ports)})
+	}
+	return res
+}
+
 // liveCell renders the apps-view live flag.
 func liveCell(live bool) *tview.TableCell {
 	if live {
@@ -459,5 +581,7 @@ func liveCell(live bool) *tview.TableCell {
 func footerText() string {
 	return "  [#FFFFFF::b]0[-:-:-] [#7C8694]overview[-]   " +
 		"[#FFFFFF::b]1[-:-:-] [#7C8694]packages[-]   [#FFFFFF::b]2[-:-:-] [#7C8694]apps[-]   " +
-		"[#FFFFFF::b]Tab[-:-:-] [#7C8694]switch[-]   [#FFFFFF::b]j/k[-:-:-] [#7C8694]move[-]   [#FFFFFF::b]q[-:-:-] [#7C8694]quit[-]"
+		"[#FFFFFF::b]3[-:-:-] [#7C8694]nodes[-]   [#FFFFFF::b]4[-:-:-] [#7C8694]pods[-]   " +
+		"[#FFFFFF::b]5[-:-:-] [#7C8694]workloads[-]   [#FFFFFF::b]6[-:-:-] [#7C8694]services[-]   " +
+		"[#FFFFFF::b]Tab[-:-:-] [#7C8694]cycle[-]   [#FFFFFF::b]j/k[-:-:-] [#7C8694]move[-]   [#FFFFFF::b]q[-:-:-] [#7C8694]quit[-]"
 }
