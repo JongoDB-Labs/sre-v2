@@ -223,6 +223,11 @@ func Run(version string, state appcatalog.State) error {
 		case '9':
 			m.setView("backups")
 			return nil
+		case 'e':
+			if m.view == "compliance" {
+				m.exportPosture()
+			}
+			return nil
 		case 'a':
 			// Open the action menu for the selected row (table views only; not while
 			// in the detail pane — the inDetail guard above already returned for that).
@@ -894,10 +899,9 @@ func (m *monitor) fetchFalco() tableResult {
 	return res
 }
 
-// fetchCompliance builds the ConMon posture rollup (off the UI goroutine).
-// All signals are best-effort: a failed source yields a WARN row rather than
-// an error return. No drillTarget references — this view is read-only.
-func (m *monitor) fetchCompliance() tableResult {
+// gatherPostureChecks collects the ConMon posture checks (best-effort, off the UI
+// goroutine). Shared by the compliance view and the export.
+func (m *monitor) gatherPostureChecks() []data.PostureCheck {
 	var checks []data.PostureCheck
 
 	// Audit-chain integrity (best-effort).
@@ -923,6 +927,14 @@ func (m *monitor) fetchCompliance() tableResult {
 		checks = append(checks, data.PostureCheck{Name: "Runtime security (Falco)", Status: data.PostureWARN, Detail: "unavailable: " + err.Error()})
 	}
 
+	return checks
+}
+
+// fetchCompliance builds the ConMon posture rollup (off the UI goroutine).
+// All signals are best-effort: a failed source yields a WARN row rather than
+// an error return. No drillTarget references — this view is read-only.
+func (m *monitor) fetchCompliance() tableResult {
+	checks := m.gatherPostureChecks()
 	res := tableResult{title: "COMPLIANCE", cols: []string{"CHECK", "STATUS", "DETAIL"}}
 	for _, c := range checks {
 		res.rows = append(res.rows, []*tview.TableCell{
@@ -930,6 +942,30 @@ func (m *monitor) fetchCompliance() tableResult {
 		})
 	}
 	return res
+}
+
+// exportPosture gathers the live posture and writes a JSON ConMon artifact to the
+// host, then shows the path. Non-destructive; the gather + write run off the UI
+// goroutine, only the result modal is marshalled back.
+func (m *monitor) exportPosture() {
+	// Capture UI-goroutine state before spawning (house anti-freeze pattern, cf. refresh()).
+	kubeCtx, tool := m.ctx, m.version
+	go func() {
+		checks := m.gatherPostureChecks()
+		now := time.Now().UTC() // one read → the filename stamp and generatedAt agree
+		path := data.ConmonExportPath(now.Format("20060102-150405"))
+		raw, err := data.BuildPostureReport(checks, kubeCtx, tool, now.Format(time.RFC3339))
+		if err == nil {
+			err = data.WriteReport(path, raw)
+		}
+		m.app.QueueUpdateDraw(func() {
+			if err != nil {
+				m.showResult("ConMon export — error", err.Error())
+			} else {
+				m.showResult("ConMon export", "wrote "+path)
+			}
+		})
+	}()
 }
 
 // postureCell colors a posture status (PASS green / WARN amber / FAIL red / — dim).
@@ -1323,6 +1359,7 @@ func footerText() string {
 		"[#FFFFFF::b]7[-:-:-] [#7C8694]alerts[-]   [#FFFFFF::b]8[-:-:-] [#7C8694]falco[-]   " +
 		"[#FFFFFF::b]9[-:-:-] [#7C8694]backups[-]   " +
 		"[#FFFFFF::b]:compliance[-:-:-][#7C8694]↵[-]   " +
+		"[#FFFFFF::b]e[-:-:-] [#7C8694]export[-]   " +
 		"[#FFFFFF::b]Tab[-:-:-] [#7C8694]cycle[-]   [#FFFFFF::b]j/k[-:-:-] [#7C8694]move[-]   " +
 		"[#FFFFFF::b]a[-:-:-] [#7C8694]actions[-]   " +
 		"[#FFFFFF::b]:[-:-:-] [#7C8694]jump[-]   [#FFFFFF::b]q[-:-:-] [#7C8694]quit[-]"

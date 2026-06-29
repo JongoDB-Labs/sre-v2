@@ -54,17 +54,23 @@ func (a fileAuditor) Record(e AuditEntry) error {
 	return err
 }
 
-// AuditPath is the operator-local action log: $XDG_STATE_HOME/srectl/… or ~/.local/state/srectl/…
-func AuditPath() string {
+// stateDir returns the srectl state directory: $XDG_STATE_HOME/srectl or
+// ~/.local/state/srectl. Returns "srectl" (cwd-relative) if home lookup fails.
+func stateDir() string {
 	base := os.Getenv("XDG_STATE_HOME")
 	if base == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return "srectl-platform-actions.jsonl" // last-resort cwd-relative
+			return "srectl" // last-resort cwd-relative
 		}
 		base = filepath.Join(home, ".local", "state")
 	}
-	return filepath.Join(base, "srectl", "platform-actions.jsonl")
+	return filepath.Join(base, "srectl")
+}
+
+// AuditPath is the operator-local action log: $XDG_STATE_HOME/srectl/… or ~/.local/state/srectl/…
+func AuditPath() string {
+	return filepath.Join(stateDir(), "platform-actions.jsonl")
 }
 
 // CurrentActor returns the kubeconfig current-context user (best-effort), else $USER, else "unknown".
