@@ -134,17 +134,18 @@ func Run(version string, state appcatalog.State) error {
 		}
 	})
 	m.tableViews = map[string]tableView{
-		"packages":  {fetch: m.fetchPackages},
-		"apps":      {fetch: m.fetchApps},
-		"nodes":     {fetch: m.fetchNodes},
-		"pods":      {fetch: m.fetchPods},
-		"workloads": {fetch: m.fetchWorkloads},
-		"services":  {fetch: m.fetchServices},
-		"alerts":    {fetch: m.fetchAlerts},
-		"falco":     {fetch: m.fetchFalco},
-		"backups":   {fetch: m.fetchBackups},
+		"packages":   {fetch: m.fetchPackages},
+		"apps":       {fetch: m.fetchApps},
+		"nodes":      {fetch: m.fetchNodes},
+		"pods":       {fetch: m.fetchPods},
+		"workloads":  {fetch: m.fetchWorkloads},
+		"services":   {fetch: m.fetchServices},
+		"alerts":     {fetch: m.fetchAlerts},
+		"falco":      {fetch: m.fetchFalco},
+		"backups":    {fetch: m.fetchBackups},
+		"compliance": {fetch: m.fetchCompliance},
 	}
-	m.viewOrder = []string{"overview", "nodes", "pods", "workloads", "services", "alerts", "falco", "backups", "packages", "apps"}
+	m.viewOrder = []string{"overview", "nodes", "pods", "workloads", "services", "alerts", "falco", "backups", "compliance", "packages", "apps"}
 	m.view = "overview"
 	m.setHeader("OVERVIEW", 0) // initial header before the first fetch lands
 
@@ -837,13 +838,33 @@ func sevCell(s string) *tview.TableCell {
 	}
 }
 
+// firingAlertSamples queries Prometheus for the firing ALERTS vector.
+// Returns nil on error (best-effort; callers treat nil as "no data").
+func (m *monitor) firingAlertSamples() []data.Sample {
+	samples, err := m.prom.Query(data.QFiringAlerts)
+	if err != nil {
+		return nil
+	}
+	return samples
+}
+
+// falcoRows fetches and parses Falco JSON-lines logs.
+// Returns nil on error (best-effort; callers treat nil as "no events").
+func (m *monitor) falcoRows() []data.FalcoRow {
+	raw, err := m.res.LogsByLabel(falcoNS, falcoSelector, falcoContainer, 200)
+	if err != nil {
+		return nil
+	}
+	return data.FalcoRows(raw)
+}
+
 func (m *monitor) fetchAlerts() tableResult {
 	if m.prom.Ref == "" {
 		return tableResult{title: "ALERTS", notice: "metrics unavailable (Prometheus unreachable)"}
 	}
-	samples, err := m.prom.Query(data.QFiringAlerts)
-	if err != nil {
-		return tableResult{title: "ALERTS", notice: "error: " + err.Error(), isError: true}
+	samples := m.firingAlertSamples()
+	if samples == nil {
+		return tableResult{title: "ALERTS", notice: "error: Prometheus query failed", isError: true}
 	}
 	rows := data.AlertRows(samples)
 	res := tableResult{title: "ALERTS"}
@@ -859,11 +880,10 @@ func (m *monitor) fetchAlerts() tableResult {
 }
 
 func (m *monitor) fetchFalco() tableResult {
-	raw, err := m.res.LogsByLabel(falcoNS, falcoSelector, falcoContainer, 200)
-	if err != nil {
-		return tableResult{title: "FALCO", notice: "error: " + err.Error(), isError: true}
+	rows := m.falcoRows()
+	if rows == nil {
+		return tableResult{title: "FALCO", notice: "error: kubectl logs failed", isError: true}
 	}
-	rows := data.FalcoRows(raw)
 	res := tableResult{title: "FALCO"}
 	if len(rows) == 0 {
 		res.notice = "no recent Falco events"
@@ -874,6 +894,50 @@ func (m *monitor) fetchFalco() tableResult {
 		res.rows = append(res.rows, []*tview.TableCell{cell(r.Time), sevCell(r.Priority), cell(r.Rule), cell(r.Namespace), cell(r.Pod)})
 	}
 	return res
+}
+
+// fetchCompliance builds the ConMon posture rollup (off the UI goroutine).
+// All signals are best-effort: a failed source yields a WARN row rather than
+// an error return. No drillTarget references — this view is read-only.
+func (m *monitor) fetchCompliance() tableResult {
+	var checks []data.PostureCheck
+
+	// Audit-chain integrity (best-effort).
+	if jobs, err := m.res.AuditChainJobs(); err == nil {
+		checks = append(checks, data.AuditChainCheck(jobs))
+	} else {
+		checks = append(checks, data.PostureCheck{Name: "Audit-chain integrity", Status: data.PostureWARN, Detail: "unavailable: " + err.Error()})
+	}
+
+	// Firing alerts (best-effort) — reuse the same Prometheus ALERTS query fetchAlerts uses.
+	checks = append(checks, data.AlertsCheck(m.firingAlertSamples()))
+
+	// Runtime security / Falco (best-effort) — reuse fetchFalco's source.
+	checks = append(checks, data.FalcoCheck(m.falcoRows()))
+
+	res := tableResult{title: "COMPLIANCE", cols: []string{"CHECK", "STATUS", "DETAIL"}}
+	for _, c := range checks {
+		res.rows = append(res.rows, []*tview.TableCell{
+			cell(c.Name), postureCell(c.Status), cell(c.Detail),
+		})
+	}
+	return res
+}
+
+// postureCell colors a posture status (PASS green / WARN amber / FAIL red / — dim).
+func postureCell(status string) *tview.TableCell {
+	c := cell(status)
+	switch status {
+	case data.PosturePASS:
+		c.SetTextColor(statusGreen)
+	case data.PostureWARN:
+		c.SetTextColor(statusAmber)
+	case data.PostureFAIL:
+		c.SetTextColor(statusRed)
+	default:
+		c.SetTextColor(consoleDim)
+	}
+	return c
 }
 
 // fetchBackups builds the backups table from pgBackRest info per PostgresCluster
@@ -1250,6 +1314,7 @@ func footerText() string {
 		"[#FFFFFF::b]5[-:-:-] [#7C8694]workloads[-]   [#FFFFFF::b]6[-:-:-] [#7C8694]services[-]   " +
 		"[#FFFFFF::b]7[-:-:-] [#7C8694]alerts[-]   [#FFFFFF::b]8[-:-:-] [#7C8694]falco[-]   " +
 		"[#FFFFFF::b]9[-:-:-] [#7C8694]backups[-]   " +
+		"[#FFFFFF::b]:compliance[-:-:-][#7C8694]↵[-]   " +
 		"[#FFFFFF::b]Tab[-:-:-] [#7C8694]cycle[-]   [#FFFFFF::b]j/k[-:-:-] [#7C8694]move[-]   " +
 		"[#FFFFFF::b]a[-:-:-] [#7C8694]actions[-]   " +
 		"[#FFFFFF::b]:[-:-:-] [#7C8694]jump[-]   [#FFFFFF::b]q[-:-:-] [#7C8694]quit[-]"
