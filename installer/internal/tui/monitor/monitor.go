@@ -145,8 +145,9 @@ func Run(version string, state appcatalog.State) error {
 		"falco":      {fetch: m.fetchFalco},
 		"backups":    {fetch: m.fetchBackups},
 		"compliance": {fetch: m.fetchCompliance},
+		"config":     {fetch: m.fetchConfig},
 	}
-	m.viewOrder = []string{"overview", "nodes", "pods", "workloads", "services", "alerts", "falco", "backups", "compliance", "packages", "apps"}
+	m.viewOrder = []string{"overview", "nodes", "pods", "workloads", "services", "alerts", "falco", "backups", "compliance", "config", "packages", "apps"}
 	m.view = "overview"
 	m.setHeader("OVERVIEW", 0) // initial header before the first fetch lands
 
@@ -962,6 +963,26 @@ func (m *monitor) fetchCompliance() tableResult {
 		res.rows = append(res.rows, []*tview.TableCell{
 			cell(c.Name), postureCell(c.Status), cell(c.Detail),
 		})
+	}
+	return res
+}
+
+// fetchConfig reads the srectl-config ConfigMap and renders the install settings
+// as a read-only SETTING/VALUE table (off the UI goroutine). Degrades gracefully
+// when the ConfigMap does not exist (platform not deployed via srectl) or when the
+// ConfigMap is present but its answers.yaml cannot be parsed.
+func (m *monitor) fetchConfig() tableResult {
+	raw, err := m.res.PlatformConfig()
+	if err != nil {
+		return tableResult{title: "CONFIG", notice: "no srectl-config found (platform not deployed via srectl, or pre-persist install)"}
+	}
+	rows := data.ConfigRows(raw)
+	if len(rows) == 0 {
+		return tableResult{title: "CONFIG", notice: "srectl-config present but unreadable"}
+	}
+	res := tableResult{title: "CONFIG", cols: []string{"SETTING", "VALUE"}}
+	for _, r := range rows {
+		res.rows = append(res.rows, []*tview.TableCell{cell(r.Key), cell(r.Value)})
 	}
 	return res
 }

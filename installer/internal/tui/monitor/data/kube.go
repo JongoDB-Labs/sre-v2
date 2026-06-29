@@ -34,6 +34,7 @@ type Resources interface {
 	RestoreInPlace(namespace, cluster, stamp string, options []string) (string, int, error)
 	CloneCluster(sourceNamespace, sourceName, newName string, options []string) (string, int, error)
 	AuditChainJobs() ([]byte, error)
+	PlatformConfig() ([]byte, error)
 }
 
 type execResources struct{}
