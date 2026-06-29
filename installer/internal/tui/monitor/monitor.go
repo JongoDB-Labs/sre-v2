@@ -995,6 +995,15 @@ func (m *monitor) actionsFor(dt drillTarget) []action {
 				preview: fmt.Sprintf("Uncordon node %s?\n\nMarks it schedulable again.", dt.name),
 				exec:    func() (string, int, error) { return m.res.SetCordon(dt.name, false) }},
 		}
+	case "postgrescluster":
+		stamp := time.Now().UTC().Format(time.RFC3339)
+		return []action{{
+			label: "Trigger backup", auditAction: "trigger-backup",
+			kind: dt.kind, namespace: dt.namespace, name: dt.name,
+			command: fmt.Sprintf("kubectl annotate postgrescluster %s -n %s pgbackrest-backup", dt.name, dt.namespace),
+			preview: fmt.Sprintf("Trigger an on-demand pgBackRest backup of %s/%s?\n\nPGO starts a backup job; nothing is destroyed.", dt.namespace, dt.name),
+			exec:    func() (string, int, error) { return m.res.TriggerBackup(dt.namespace, dt.name, stamp) },
+		}}
 	}
 	return nil
 }
