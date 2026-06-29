@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -98,14 +99,18 @@ func SigningCheck(results []ImageResult, configured bool) PostureCheck {
 	if len(results) == 0 {
 		return PostureCheck{name, PostureNA, "no images under the configured prefix"}
 	}
-	var bad []string
+	var bad []ImageResult
 	for _, r := range results {
 		if !r.OK {
-			bad = append(bad, r.Image)
+			bad = append(bad, r)
 		}
 	}
 	if len(bad) > 0 {
-		return PostureCheck{name, PostureFAIL, fmt.Sprintf("%d/%d unverified (e.g. %s)", len(bad), len(results), short(bad[0]))}
+		detail := fmt.Sprintf("%d/%d unverified (e.g. %s)", len(bad), len(results), short(bad[0].Image))
+		if bad[0].Err != "" {
+			detail += ": " + bad[0].Err
+		}
+		return PostureCheck{name, PostureFAIL, detail}
 	}
 	return PostureCheck{name, PosturePASS, fmt.Sprintf("%d image(s) cosign-verified", len(results))}
 }
@@ -124,8 +129,34 @@ type Cosign interface {
 
 type execCosign struct{}
 
-// NewCosign returns the real cosign-backed verifier.
-func NewCosign() Cosign { return execCosign{} }
+// cachingCosign memoizes successful verifications. Images are digest-pinned
+// (immutable), so a verified image stays verified — this avoids re-running
+// `cosign verify` (a registry + Rekor round-trip) on every ~5s gather. Only
+// successes are cached; a failure retries next time (handles transient errors).
+type cachingCosign struct {
+	inner Cosign
+	mu    sync.Mutex
+	ok    map[string]bool
+}
+
+func (c *cachingCosign) VerifyImage(image string, cfg VerifyConfig) error {
+	c.mu.Lock()
+	cached := c.ok[image]
+	c.mu.Unlock()
+	if cached {
+		return nil
+	}
+	err := c.inner.VerifyImage(image, cfg)
+	if err == nil {
+		c.mu.Lock()
+		c.ok[image] = true
+		c.mu.Unlock()
+	}
+	return err
+}
+
+// NewCosign returns a cosign-backed verifier with a digest-keyed success cache.
+func NewCosign() Cosign { return &cachingCosign{inner: execCosign{}, ok: map[string]bool{}} }
 
 func (execCosign) VerifyImage(image string, c VerifyConfig) error {
 	ctx, cancel := context.WithTimeout(context.Background(), cosignTimeout)
