@@ -32,6 +32,7 @@ type Resources interface {
 	PgBackrestInfo(namespace, pod string) ([]byte, error)
 	TriggerBackup(namespace, cluster, stamp string) (string, int, error)
 	CloneCluster(sourceNamespace, sourceName, newName string, options []string) (string, int, error)
+	AuditChainJobs() ([]byte, error)
 }
 
 type execResources struct{}
