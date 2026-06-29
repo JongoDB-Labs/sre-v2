@@ -839,31 +839,29 @@ func sevCell(s string) *tview.TableCell {
 }
 
 // firingAlertSamples queries Prometheus for the firing ALERTS vector.
-// Returns nil on error (best-effort; callers treat nil as "no data").
-func (m *monitor) firingAlertSamples() []data.Sample {
-	samples, err := m.prom.Query(data.QFiringAlerts)
-	if err != nil {
-		return nil
-	}
-	return samples
+// Returns the samples and any query error so callers can distinguish a genuine
+// error from a successful-but-empty result.
+func (m *monitor) firingAlertSamples() ([]data.Sample, error) {
+	return m.prom.Query(data.QFiringAlerts)
 }
 
 // falcoRows fetches and parses Falco JSON-lines logs.
-// Returns nil on error (best-effort; callers treat nil as "no events").
-func (m *monitor) falcoRows() []data.FalcoRow {
+// Returns the parsed rows and any fetch/parse error so callers can distinguish
+// a genuine error from a successful-but-empty log stream.
+func (m *monitor) falcoRows() ([]data.FalcoRow, error) {
 	raw, err := m.res.LogsByLabel(falcoNS, falcoSelector, falcoContainer, 200)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return data.FalcoRows(raw)
+	return data.FalcoRows(raw), nil
 }
 
 func (m *monitor) fetchAlerts() tableResult {
 	if m.prom.Ref == "" {
 		return tableResult{title: "ALERTS", notice: "metrics unavailable (Prometheus unreachable)"}
 	}
-	samples := m.firingAlertSamples()
-	if samples == nil {
+	samples, err := m.firingAlertSamples()
+	if err != nil {
 		return tableResult{title: "ALERTS", notice: "error: Prometheus query failed", isError: true}
 	}
 	rows := data.AlertRows(samples)
@@ -880,8 +878,8 @@ func (m *monitor) fetchAlerts() tableResult {
 }
 
 func (m *monitor) fetchFalco() tableResult {
-	rows := m.falcoRows()
-	if rows == nil {
+	rows, err := m.falcoRows()
+	if err != nil {
 		return tableResult{title: "FALCO", notice: "error: kubectl logs failed", isError: true}
 	}
 	res := tableResult{title: "FALCO"}
@@ -910,10 +908,14 @@ func (m *monitor) fetchCompliance() tableResult {
 	}
 
 	// Firing alerts (best-effort) — reuse the same Prometheus ALERTS query fetchAlerts uses.
-	checks = append(checks, data.AlertsCheck(m.firingAlertSamples()))
+	// Errors are ignored: data.AlertsCheck(nil) renders a WARN row gracefully.
+	samples, _ := m.firingAlertSamples()
+	checks = append(checks, data.AlertsCheck(samples))
 
 	// Runtime security / Falco (best-effort) — reuse fetchFalco's source.
-	checks = append(checks, data.FalcoCheck(m.falcoRows()))
+	// Errors are ignored: data.FalcoCheck(nil) renders a WARN row gracefully.
+	rows, _ := m.falcoRows()
+	checks = append(checks, data.FalcoCheck(rows))
 
 	res := tableResult{title: "COMPLIANCE", cols: []string{"CHECK", "STATUS", "DETAIL"}}
 	for _, c := range checks {
