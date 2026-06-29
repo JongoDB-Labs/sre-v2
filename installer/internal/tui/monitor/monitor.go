@@ -1075,6 +1075,7 @@ type action struct {
 	needsReplicas                  bool                        // true for Scale: route to showScaleInput, not showConfirm
 	needsTypedName                 bool                        // true for Delete: route to showTypedConfirm, not showConfirm
 	needsRestoreName               bool                        // true for Restore: route to showRestoreInput, not showConfirm
+	confirmLabel                   string                      // typed-name modal's confirm-button label; "" → "Delete" for back-compat
 }
 
 // actionsFor returns the reversible Day-2 actions available for a resource.
@@ -1140,6 +1141,16 @@ func (m *monitor) actionsFor(dt drillTarget) []action {
 				label: "Restore to new cluster", auditAction: "restore-clone", needsRestoreName: true,
 				kind: dt.kind, namespace: dt.namespace, name: dt.name,
 				preview: fmt.Sprintf("Clone %s/%s into a NEW cluster from its latest backup (the original is untouched).", dt.namespace, dt.name),
+			},
+			{
+				label: "Restore in place (⚠ overwrites data)", auditAction: "restore-in-place",
+				needsTypedName: true, confirmLabel: "Restore in place",
+				kind: dt.kind, namespace: dt.namespace, name: dt.name,
+				command: fmt.Sprintf("kubectl patch postgrescluster %s -n %s (in-place restore)", dt.name, dt.namespace),
+				preview: fmt.Sprintf("⚠ DESTRUCTIVE: restore %s/%s IN PLACE from its latest backup.\n\nThis OVERWRITES the current database — data written since the backup is LOST.\nType the cluster name to confirm.", dt.namespace, dt.name),
+				exec: func() (string, int, error) {
+					return m.res.RestoreInPlace(dt.namespace, dt.name, time.Now().UTC().Format(time.RFC3339), nil)
+				},
 			},
 		}
 	}
@@ -1323,16 +1334,23 @@ func (m *monitor) showTypedConfirm(a action) {
 	form := tview.NewForm()
 	form.SetBackgroundColor(consoleBg)
 	form.AddInputField("", "", 0, nil, nil) // empty label + fill width → contained in the box
-	form.AddButton("Delete", func() {
+	label := a.confirmLabel
+	if label == "" {
+		label = "Delete"
+	}
+	form.AddButton(label, func() {
 		typed := strings.TrimSpace(form.GetFormItem(0).(*tview.InputField).GetText())
 		if typed != a.name {
-			return // name mismatch (incl. empty) → no delete; operator can correct or Cancel
+			return // name mismatch (incl. empty) → no-op; operator can correct or Cancel
 		}
-		del := a
-		del.command = fmt.Sprintf("kubectl delete %s -n %s %s", a.kind, a.namespace, a.name)
-		del.preview = fmt.Sprintf("Delete %s %s/%s", a.kind, a.namespace, a.name)
-		del.exec = func() (string, int, error) { return m.res.Delete(a.kind, a.namespace, a.name) }
-		m.pending = del
+		act := a
+		if act.exec == nil {
+			// legacy Delete path (unchanged): build the delete exec here.
+			act.command = fmt.Sprintf("kubectl delete %s -n %s %s", a.kind, a.namespace, a.name)
+			act.preview = fmt.Sprintf("Delete %s %s/%s", a.kind, a.namespace, a.name)
+			act.exec = func() (string, int, error) { return m.res.Delete(a.kind, a.namespace, a.name) }
+		}
+		m.pending = act
 		m.executePending()
 	})
 	form.AddButton("Cancel", func() { m.closeModal() })
