@@ -1345,6 +1345,9 @@ func (m *monitor) showTypedConfirm(a action) {
 		}
 		act := a
 		if act.exec == nil {
+			// CONTRACT: a typed-name action with no exec is treated as a Delete — the
+			// existing pods/deployments/… Delete actions rely on this legacy path. Any
+			// NEW typed-name action MUST set its own exec, or it silently becomes a delete.
 			// legacy Delete path (unchanged): build the delete exec here.
 			act.command = fmt.Sprintf("kubectl delete %s -n %s %s", a.kind, a.namespace, a.name)
 			act.preview = fmt.Sprintf("Delete %s %s/%s", a.kind, a.namespace, a.name)
