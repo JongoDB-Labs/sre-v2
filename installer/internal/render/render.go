@@ -26,8 +26,9 @@ type File struct {
 	Content string
 }
 
-// Render produces both output files from the answers and catalog. It validates
-// the answers first so callers get one clear error instead of malformed output.
+// Render produces the output files (UDS config, values overlay, and the
+// srectl-config ConfigMap) from the answers and catalog. It validates the
+// answers first so callers get one clear error instead of malformed output.
 func Render(a config.Answers, cat *catalog.Catalog) ([]File, error) {
 	if err := a.Validate(); err != nil {
 		return nil, err
@@ -40,13 +41,18 @@ func Render(a config.Answers, cat *catalog.Catalog) ([]File, error) {
 	if err != nil {
 		return nil, err
 	}
+	platformCfg, err := renderPlatformConfig(a)
+	if err != nil {
+		return nil, err
+	}
 	return []File{
 		{Name: UDSConfigFile, Content: udsCfg},
 		{Name: ValuesOverlayFile, Content: overlay},
+		{Name: PlatformConfigFile, Content: platformCfg},
 	}, nil
 }
 
-// Write renders both files and writes them into dir, creating dir if needed.
+// Write renders the files and writes them into dir, creating dir if needed.
 func Write(a config.Answers, cat *catalog.Catalog, dir string) ([]string, error) {
 	files, err := Render(a, cat)
 	if err != nil {
