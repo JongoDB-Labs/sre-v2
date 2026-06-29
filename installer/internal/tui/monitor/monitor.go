@@ -907,15 +907,21 @@ func (m *monitor) fetchCompliance() tableResult {
 		checks = append(checks, data.PostureCheck{Name: "Audit-chain integrity", Status: data.PostureWARN, Detail: "unavailable: " + err.Error()})
 	}
 
-	// Firing alerts (best-effort) — reuse the same Prometheus ALERTS query fetchAlerts uses.
-	// Errors are ignored: data.AlertsCheck(nil) renders a WARN row gracefully.
-	samples, _ := m.firingAlertSamples()
-	checks = append(checks, data.AlertsCheck(samples))
+	// Firing alerts (best-effort). An unreachable Prometheus must NOT read as PASS on
+	// a compliance screen — surface it as WARN "unavailable" (like the audit-chain row),
+	// since "couldn't verify" is not "clean".
+	if samples, err := m.firingAlertSamples(); err == nil {
+		checks = append(checks, data.AlertsCheck(samples))
+	} else {
+		checks = append(checks, data.PostureCheck{Name: "Firing alerts", Status: data.PostureWARN, Detail: "unavailable: " + err.Error()})
+	}
 
-	// Runtime security / Falco (best-effort) — reuse fetchFalco's source.
-	// Errors are ignored: data.FalcoCheck(nil) renders a WARN row gracefully.
-	rows, _ := m.falcoRows()
-	checks = append(checks, data.FalcoCheck(rows))
+	// Runtime security / Falco (best-effort) — same rule: an unreachable Falco is WARN, not PASS.
+	if rows, err := m.falcoRows(); err == nil {
+		checks = append(checks, data.FalcoCheck(rows))
+	} else {
+		checks = append(checks, data.PostureCheck{Name: "Runtime security (Falco)", Status: data.PostureWARN, Detail: "unavailable: " + err.Error()})
+	}
 
 	res := tableResult{title: "COMPLIANCE", cols: []string{"CHECK", "STATUS", "DETAIL"}}
 	for _, c := range checks {
