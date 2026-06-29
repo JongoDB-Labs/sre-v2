@@ -33,3 +33,41 @@ func TestAuditPath_NonEmpty(t *testing.T) {
 		t.Fatalf("unexpected audit path: %s", AuditPath())
 	}
 }
+
+func TestAuditPatch(t *testing.T) {
+	got := auditPatch("a123", `{"action":"delete","ok":true}`+"\n")
+	// must be valid JSON of shape {"data":{"a123":"<jsonl>"}} with the jsonl escaped
+	var p struct {
+		Data map[string]string `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(got), &p); err != nil {
+		t.Fatalf("auditPatch not valid json: %v (%s)", err, got)
+	}
+	if p.Data["a123"] != `{"action":"delete","ok":true}`+"\n" {
+		t.Fatalf("round-trip lost the jsonl value: %q", p.Data["a123"])
+	}
+}
+
+type fakeAuditor struct {
+	got []AuditEntry
+	err error
+}
+
+func (f *fakeAuditor) Record(e AuditEntry) error { f.got = append(f.got, e); return f.err }
+
+func TestMultiAuditor_RecordsAllEvenOnError(t *testing.T) {
+	a := &fakeAuditor{err: errorString("boom")} // a fails
+	b := &fakeAuditor{}                         // b should still get it
+	m := NewMultiAuditor(a, b)
+	err := m.Record(AuditEntry{Action: "delete"})
+	if err == nil {
+		t.Fatal("multi must surface the sub-auditor error")
+	}
+	if len(a.got) != 1 || len(b.got) != 1 {
+		t.Fatalf("both sub-auditors must be attempted: a=%d b=%d", len(a.got), len(b.got))
+	}
+}
+
+type errorString string
+
+func (e errorString) Error() string { return string(e) }

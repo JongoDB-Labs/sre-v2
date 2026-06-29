@@ -1,11 +1,14 @@
 package data
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // AuditEntry is one record of an executed Day-2 action.
@@ -76,4 +79,58 @@ func CurrentActor() string {
 		return u
 	}
 	return "unknown"
+}
+
+// auditPatch builds a strategic/merge-patch body that ADDS one data key (no
+// read-modify-write). json.Marshal escapes the JSONL value safely.
+func auditPatch(key, jsonl string) string {
+	b, _ := json.Marshal(map[string]any{"data": map[string]string{key: jsonl}})
+	return string(b)
+}
+
+type configMapAuditor struct{ namespace, name string }
+
+// NewConfigMapAuditor records each entry as a new key in a ConfigMap (the substrate
+// audit sink, spec §3.3). It bootstraps the ns+cm on first write. Best-effort: a
+// failure is returned but does not panic; the monitor ignores audit errors.
+func NewConfigMapAuditor(namespace, name string) Auditor {
+	return configMapAuditor{namespace: namespace, name: name}
+}
+
+func (a configMapAuditor) Record(e AuditEntry) error {
+	key := "a" + strconv.FormatInt(time.Now().UnixNano(), 10) // valid cm key (letter + digits)
+	patch := auditPatch(key, e.JSONL())
+	if err := a.run("patch", "configmap", a.name, "-n", a.namespace, "--type", "merge", "-p", patch); err != nil {
+		a.ensure() // bootstrap ns + cm, then retry once
+		return a.run("patch", "configmap", a.name, "-n", a.namespace, "--type", "merge", "-p", patch)
+	}
+	return nil
+}
+
+func (a configMapAuditor) ensure() {
+	_ = a.run("create", "namespace", a.namespace)               // ignore "already exists"
+	_ = a.run("create", "configmap", a.name, "-n", a.namespace) // ignore "already exists"
+}
+
+func (a configMapAuditor) run(args ...string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, "kubectl", args...).Run()
+}
+
+// multiAuditor fans Record out to all sub-auditors (e.g. host-file + ConfigMap),
+// attempting every one even if an earlier sink errors; returns the first error.
+type multiAuditor struct{ auditors []Auditor }
+
+// NewMultiAuditor records each entry to all the given auditors.
+func NewMultiAuditor(auditors ...Auditor) Auditor { return multiAuditor{auditors: auditors} }
+
+func (m multiAuditor) Record(e AuditEntry) error {
+	var firstErr error
+	for _, a := range m.auditors {
+		if err := a.Record(e); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
