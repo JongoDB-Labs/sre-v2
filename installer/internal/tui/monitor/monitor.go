@@ -103,8 +103,11 @@ func Run(version string, state appcatalog.State) error {
 		app: app, state: state, table: table, header: header,
 		version: version, ctx: "…",
 		main: main, overviewTV: overviewTV, prom: prom,
-		res:     data.NewResources(),
-		auditor: data.NewFileAuditor(data.AuditPath()),
+		res: data.NewResources(),
+		auditor: data.NewMultiAuditor(
+			data.NewFileAuditor(data.AuditPath()),
+			data.NewConfigMapAuditor("sre-system", "srectl-platform-actions"),
+		),
 	}
 	m.cmdBar = cmdBar
 	m.detail = detail
@@ -901,13 +904,15 @@ type action struct {
 func (m *monitor) actionsFor(dt drillTarget) []action {
 	switch dt.kind {
 	case "pods":
-		return []action{{
-			label: "Restart", auditAction: "restart-pod",
-			kind: dt.kind, namespace: dt.namespace, name: dt.name,
-			command: fmt.Sprintf("kubectl delete pod -n %s %s", dt.namespace, dt.name),
-			preview: fmt.Sprintf("Restart pod %s/%s?\n\nDeletes the pod; its controller recreates it.", dt.namespace, dt.name),
-			exec:    func() (string, int, error) { return m.res.DeletePod(dt.namespace, dt.name) },
-		}}
+		return []action{
+			{label: "Restart", auditAction: "restart-pod",
+				kind: dt.kind, namespace: dt.namespace, name: dt.name,
+				command: fmt.Sprintf("kubectl delete pod -n %s %s", dt.namespace, dt.name),
+				preview: fmt.Sprintf("Restart pod %s/%s?\n\nDeletes the pod; its controller recreates it.", dt.namespace, dt.name),
+				exec:    func() (string, int, error) { return m.res.DeletePod(dt.namespace, dt.name) }},
+			{label: "Delete", auditAction: "delete", needsTypedName: true,
+				kind: dt.kind, namespace: dt.namespace, name: dt.name},
+		}
 	case "deployments", "statefulsets":
 		return []action{
 			{label: "Rollout restart", auditAction: "rollout-restart",
