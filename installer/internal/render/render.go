@@ -40,9 +40,14 @@ func Render(a config.Answers, cat *catalog.Catalog) ([]File, error) {
 	if err != nil {
 		return nil, err
 	}
+	platformCfg, err := renderPlatformConfig(a)
+	if err != nil {
+		return nil, err
+	}
 	return []File{
 		{Name: UDSConfigFile, Content: udsCfg},
 		{Name: ValuesOverlayFile, Content: overlay},
+		{Name: PlatformConfigFile, Content: platformCfg},
 	}, nil
 }
 
