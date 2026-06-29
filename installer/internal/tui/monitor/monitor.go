@@ -944,6 +944,7 @@ type action struct {
 	exec                           func() (string, int, error) // runs OFF the UI goroutine (Task 4)
 	needsReplicas                  bool                        // true for Scale: route to showScaleInput, not showConfirm
 	needsTypedName                 bool                        // true for Delete: route to showTypedConfirm, not showConfirm
+	needsRestoreName               bool                        // true for Restore: route to showRestoreInput, not showConfirm
 }
 
 // actionsFor returns the reversible Day-2 actions available for a resource.
@@ -997,13 +998,20 @@ func (m *monitor) actionsFor(dt drillTarget) []action {
 		}
 	case "postgrescluster":
 		stamp := time.Now().UTC().Format(time.RFC3339)
-		return []action{{
-			label: "Trigger backup", auditAction: "trigger-backup",
-			kind: dt.kind, namespace: dt.namespace, name: dt.name,
-			command: fmt.Sprintf("kubectl patch postgrescluster %s -n %s (manual pgBackRest backup)", dt.name, dt.namespace),
-			preview: fmt.Sprintf("Trigger an on-demand pgBackRest backup of %s/%s?\n\nPGO starts a backup job; nothing is destroyed.", dt.namespace, dt.name),
-			exec:    func() (string, int, error) { return m.res.TriggerBackup(dt.namespace, dt.name, stamp) },
-		}}
+		return []action{
+			{
+				label: "Trigger backup", auditAction: "trigger-backup",
+				kind: dt.kind, namespace: dt.namespace, name: dt.name,
+				command: fmt.Sprintf("kubectl patch postgrescluster %s -n %s (manual pgBackRest backup)", dt.name, dt.namespace),
+				preview: fmt.Sprintf("Trigger an on-demand pgBackRest backup of %s/%s?\n\nPGO starts a backup job; nothing is destroyed.", dt.namespace, dt.name),
+				exec:    func() (string, int, error) { return m.res.TriggerBackup(dt.namespace, dt.name, stamp) },
+			},
+			{
+				label: "Restore to new cluster", auditAction: "restore-clone", needsRestoreName: true,
+				kind: dt.kind, namespace: dt.namespace, name: dt.name,
+				preview: fmt.Sprintf("Clone %s/%s into a NEW cluster from its latest backup (the original is untouched).", dt.namespace, dt.name),
+			},
+		}
 	}
 	return nil
 }
@@ -1044,6 +1052,10 @@ func (m *monitor) openActions(dt drillTarget) {
 		}
 		if acts[i].needsReplicas {
 			m.showScaleInput(acts[i])
+			return
+		}
+		if acts[i].needsRestoreName {
+			m.showRestoreInput(acts[i])
 			return
 		}
 		m.showConfirm(acts[i])
@@ -1127,6 +1139,37 @@ func (m *monitor) showScaleInput(a action) {
 	form.SetButtonsAlign(tview.AlignCenter)
 	// Center the form over "main" with a Grid (transparent margins).
 	grid := tview.NewGrid().SetColumns(0, 44, 0).SetRows(0, 9, 0).AddItem(form, 1, 1, 1, 1, 0, 0, true)
+	m.root.RemovePage("modal")
+	m.root.AddPage("modal", grid, true, true)
+	m.modalActive = true
+	m.app.SetFocus(form)
+}
+
+// showRestoreInput collects the new cluster name, then clones the source into a NEW
+// cluster via the audited executePending. Non-destructive → a simple input gate (no
+// typed-name). Short label + fitting width keep the field inside the dialog box.
+func (m *monitor) showRestoreInput(a action) {
+	form := tview.NewForm()
+	form.SetBackgroundColor(consoleBg)
+	form.AddInputField("New cluster name", a.name+"-restore", 28, func(textToCheck string, lastChar rune) bool {
+		return (lastChar >= 'a' && lastChar <= 'z') || (lastChar >= '0' && lastChar <= '9') || lastChar == '-'
+	}, nil)
+	form.AddButton("Restore", func() {
+		newName := strings.TrimSpace(form.GetFormItem(0).(*tview.InputField).GetText())
+		if newName == "" || newName == a.name {
+			return // empty or same-as-source → no-op; operator can correct or Cancel
+		}
+		r := a
+		r.command = fmt.Sprintf("kubectl create postgrescluster %s -n %s (clone of %s)", newName, a.namespace, a.name)
+		r.preview = fmt.Sprintf("Clone %s/%s → new cluster %s", a.namespace, a.name, newName)
+		r.exec = func() (string, int, error) { return m.res.CloneCluster(a.namespace, a.name, newName, nil) }
+		m.pending = r
+		m.executePending()
+	})
+	form.AddButton("Cancel", func() { m.closeModal() })
+	form.SetBorder(true).SetTitle(fmt.Sprintf(" Restore %s/%s → new cluster ", a.kind, a.name)).SetTitleColor(consoleText)
+	form.SetButtonsAlign(tview.AlignCenter)
+	grid := tview.NewGrid().SetColumns(0, 60, 0).SetRows(0, 9, 0).AddItem(form, 1, 1, 1, 1, 0, 0, true)
 	m.root.RemovePage("modal")
 	m.root.AddPage("modal", grid, true, true)
 	m.modalActive = true
