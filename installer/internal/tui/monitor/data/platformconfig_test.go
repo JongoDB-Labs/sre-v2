@@ -33,3 +33,11 @@ func TestConfigRows_BadJSON(t *testing.T) {
 		t.Fatalf("bad json → nil, got %v", rows)
 	}
 }
+
+func TestConfigRows_BadYAML(t *testing.T) {
+	// valid ConfigMap JSON, but the embedded answers.yaml is not valid YAML
+	const bad = `{"data":{"answers.yaml":": : not yaml"}}`
+	if rows := ConfigRows([]byte(bad)); rows != nil {
+		t.Fatalf("bad answers.yaml → nil, got %v", rows)
+	}
+}
