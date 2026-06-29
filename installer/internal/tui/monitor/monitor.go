@@ -109,6 +109,7 @@ func Run(version string, state appcatalog.State) error {
 			data.NewFileAuditor(data.AuditPath()),
 			data.NewConfigMapAuditor("sre-system", "srectl-platform-actions"),
 		),
+		cosign: data.NewCosign(),
 	}
 	m.cmdBar = cmdBar
 	m.detail = detail
@@ -364,6 +365,8 @@ type monitor struct {
 	// audit (Task 4)
 	auditor data.Auditor // writes NDJSON audit entries to disk
 	actor   string       // identity of the operator (discovered off-UI at startup)
+	// signing posture (P7 T2)
+	cosign data.Cosign // read-only image-signing verifier (cosign verify, off-UI)
 }
 
 // setView switches the active view immediately (page + selection, both cheap) and
@@ -925,6 +928,25 @@ func (m *monitor) gatherPostureChecks() []data.PostureCheck {
 		checks = append(checks, data.FalcoCheck(rows))
 	} else {
 		checks = append(checks, data.PostureCheck{Name: "Runtime security (Falco)", Status: data.PostureWARN, Detail: "unavailable: " + err.Error()})
+	}
+
+	// Software supply-chain: image signing (config-driven, off-UI, read-only).
+	cfg := data.LoadVerifyConfig()
+	if !cfg.Configured() {
+		checks = append(checks, data.SigningCheck(nil, false))
+	} else if pods, err := m.res.Get("pods", "-A"); err == nil {
+		imgs := data.RunningImages(pods, cfg.ImagePrefix)
+		var results []data.ImageResult
+		for _, img := range imgs {
+			r := data.ImageResult{Image: img, OK: true}
+			if verr := m.cosign.VerifyImage(img, cfg); verr != nil {
+				r.OK, r.Err = false, verr.Error()
+			}
+			results = append(results, r)
+		}
+		checks = append(checks, data.SigningCheck(results, true))
+	} else {
+		checks = append(checks, data.PostureCheck{Name: "Image signing", Status: data.PostureWARN, Detail: "unavailable: " + err.Error()})
 	}
 
 	return checks
