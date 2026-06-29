@@ -1361,7 +1361,7 @@ func (m *monitor) showTypedConfirm(a action) {
 		AddItem(prompt, 2, 0, false).
 		AddItem(form, 0, 1, true)
 	box.SetBorder(true).
-		SetTitle(fmt.Sprintf(" ⚠ Delete %s/%s ", a.kind, a.name)).
+		SetTitle(fmt.Sprintf(" ⚠ %s %s/%s ", label, a.kind, a.name)).
 		SetTitleColor(statusRed)
 	box.SetBackgroundColor(consoleBg)
 	// Center the dialog over "main" with a Grid (transparent margins).
