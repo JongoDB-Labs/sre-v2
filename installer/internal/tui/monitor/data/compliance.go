@@ -9,8 +9,13 @@ import (
 	"time"
 )
 
-// PostureCheck is one continuous-monitoring posture line for the compliance view.
-type PostureCheck struct{ Name, Status, Detail string }
+// PostureCheck is one continuous-monitoring posture line. JSON tags give the
+// exported ConMon artifact lowercase keys consistent with the rest of the schema.
+type PostureCheck struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	Detail string `json:"detail"`
+}
 
 const (
 	PosturePASS = "PASS"
