@@ -61,7 +61,9 @@ func BuildPostureReport(checks []PostureCheck, kubeContext, tool, generatedAt st
 }
 
 // ConmonExportPath is the artifact path for a given timestamp, under the srectl
-// state dir (same base as the audit log).
+// state dir (same base as the audit log). The stamp is second-resolution, so a
+// second export within the same wall-clock second overwrites (idempotent — the
+// same live posture is regenerated, so nothing meaningful is lost).
 func ConmonExportPath(stamp string) string {
 	return filepath.Join(stateDir(), "conmon-posture-"+stamp+".json")
 }

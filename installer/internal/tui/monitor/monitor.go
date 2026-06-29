@@ -948,11 +948,13 @@ func (m *monitor) fetchCompliance() tableResult {
 // host, then shows the path. Non-destructive; the gather + write run off the UI
 // goroutine, only the result modal is marshalled back.
 func (m *monitor) exportPosture() {
+	// Capture UI-goroutine state before spawning (house anti-freeze pattern, cf. refresh()).
+	kubeCtx, tool := m.ctx, m.version
 	go func() {
 		checks := m.gatherPostureChecks()
-		stamp := time.Now().UTC().Format("20060102-150405")
-		path := data.ConmonExportPath(stamp)
-		raw, err := data.BuildPostureReport(checks, m.ctx, m.version, time.Now().UTC().Format(time.RFC3339))
+		now := time.Now().UTC() // one read → the filename stamp and generatedAt agree
+		path := data.ConmonExportPath(now.Format("20060102-150405"))
+		raw, err := data.BuildPostureReport(checks, kubeCtx, tool, now.Format(time.RFC3339))
 		if err == nil {
 			err = data.WriteReport(path, raw)
 		}
