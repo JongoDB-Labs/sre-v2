@@ -31,6 +31,7 @@ type Resources interface {
 	RepoHostPod(namespace, cluster string) (string, error)
 	PgBackrestInfo(namespace, pod string) ([]byte, error)
 	TriggerBackup(namespace, cluster, stamp string) (string, int, error)
+	RestoreInPlace(namespace, cluster, stamp string, options []string) (string, int, error)
 	CloneCluster(sourceNamespace, sourceName, newName string, options []string) (string, int, error)
 	AuditChainJobs() ([]byte, error)
 }
