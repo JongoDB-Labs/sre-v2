@@ -1137,9 +1137,19 @@ func (m *monitor) showScaleInput(a action) {
 // operator must type the resource's exact name to confirm. On match it runs the
 // action via the shared executePending (off-UI + audited). Fresh form per call.
 func (m *monitor) showTypedConfirm(a action) {
+	// The confirm prompt lives in a wrapping TextView, NOT the input-field label:
+	// a long resource name in a field label overflows the dialog border (tview does
+	// not wrap/truncate form-field labels). The field itself uses an empty label and
+	// fill width (0) so it always stays inside the box, whatever the name length.
+	prompt := tview.NewTextView().
+		SetText(fmt.Sprintf("Type \"%s\" to confirm:", a.name)).
+		SetWrap(true)
+	prompt.SetTextColor(consoleText)
+	prompt.SetBackgroundColor(consoleBg)
+
 	form := tview.NewForm()
 	form.SetBackgroundColor(consoleBg)
-	form.AddInputField(fmt.Sprintf("Type \"%s\" to confirm", a.name), "", 40, nil, nil)
+	form.AddInputField("", "", 0, nil, nil) // empty label + fill width → contained in the box
 	form.AddButton("Delete", func() {
 		typed := strings.TrimSpace(form.GetFormItem(0).(*tview.InputField).GetText())
 		if typed != a.name {
@@ -1153,12 +1163,18 @@ func (m *monitor) showTypedConfirm(a action) {
 		m.executePending()
 	})
 	form.AddButton("Cancel", func() { m.closeModal() })
-	form.SetBorder(true).
+	form.SetButtonsAlign(tview.AlignCenter)
+
+	// Prompt (wrapping) above the form, both inside one bordered box.
+	box := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(prompt, 2, 0, false).
+		AddItem(form, 0, 1, true)
+	box.SetBorder(true).
 		SetTitle(fmt.Sprintf(" ⚠ Delete %s/%s ", a.kind, a.name)).
 		SetTitleColor(statusRed)
-	form.SetButtonsAlign(tview.AlignCenter)
-	// Center the form over "main" with a Grid (transparent margins).
-	grid := tview.NewGrid().SetColumns(0, 56, 0).SetRows(0, 11, 0).AddItem(form, 1, 1, 1, 1, 0, 0, true)
+	box.SetBackgroundColor(consoleBg)
+	// Center the dialog over "main" with a Grid (transparent margins).
+	grid := tview.NewGrid().SetColumns(0, 56, 0).SetRows(0, 12, 0).AddItem(box, 1, 1, 1, 1, 0, 0, true)
 	m.root.RemovePage("modal")
 	m.root.AddPage("modal", grid, true, true)
 	m.modalActive = true
