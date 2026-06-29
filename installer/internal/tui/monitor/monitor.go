@@ -1000,7 +1000,7 @@ func (m *monitor) actionsFor(dt drillTarget) []action {
 		return []action{{
 			label: "Trigger backup", auditAction: "trigger-backup",
 			kind: dt.kind, namespace: dt.namespace, name: dt.name,
-			command: fmt.Sprintf("kubectl annotate postgrescluster %s -n %s pgbackrest-backup", dt.name, dt.namespace),
+			command: fmt.Sprintf("kubectl patch postgrescluster %s -n %s (manual pgBackRest backup)", dt.name, dt.namespace),
 			preview: fmt.Sprintf("Trigger an on-demand pgBackRest backup of %s/%s?\n\nPGO starts a backup job; nothing is destroyed.", dt.namespace, dt.name),
 			exec:    func() (string, int, error) { return m.res.TriggerBackup(dt.namespace, dt.name, stamp) },
 		}}

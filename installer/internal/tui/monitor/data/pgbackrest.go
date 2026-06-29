@@ -72,9 +72,21 @@ func pgbackrestInfoArgs(namespace, pod string) []string {
 	return []string{"exec", "-n", namespace, pod, "-c", "pgbackrest", "--", "pgbackrest", "info", "--output=json"}
 }
 
-func triggerBackupArgs(namespace, cluster, stamp string) []string {
-	return []string{"annotate", "postgrescluster", cluster, "-n", namespace,
-		"postgres-operator.crunchydata.com/pgbackrest-backup=" + stamp, "--overwrite"}
+// triggerBackupPatch is the merge-patch that PGO needs to run an on-demand backup:
+// it sets the manual repo AND the pgbackrest-backup annotation (both are required).
+func triggerBackupPatch(repo, stamp string) string {
+	b, _ := json.Marshal(map[string]any{
+		"metadata": map[string]any{"annotations": map[string]string{
+			"postgres-operator.crunchydata.com/pgbackrest-backup": stamp}},
+		"spec": map[string]any{"backups": map[string]any{"pgbackrest": map[string]any{
+			"manual": map[string]string{"repoName": repo}}}},
+	})
+	return string(b)
+}
+
+// triggerBackupArgs builds `kubectl patch postgrescluster <cluster> -n <ns> --type merge -p <patch>`.
+func triggerBackupArgs(namespace, cluster, repo, stamp string) []string {
+	return []string{"patch", "postgrescluster", cluster, "-n", namespace, "--type", "merge", "-p", triggerBackupPatch(repo, stamp)}
 }
 
 func repoHostSelector(cluster string) string {
@@ -111,7 +123,15 @@ func (execResources) PgBackrestInfo(namespace, pod string) ([]byte, error) {
 	return pgbRun(pgbackrestInfoArgs(namespace, pod)...)
 }
 
-// TriggerBackup annotates the PostgresCluster to start an on-demand pgBackRest backup.
+// TriggerBackup sets the manual repo + the backup annotation so PGO runs an
+// on-demand pgBackRest backup. It discovers the cluster's first repo (default repo1).
 func (execResources) TriggerBackup(namespace, cluster, stamp string) (string, int, error) {
-	return runAction(triggerBackupArgs(namespace, cluster, stamp))
+	repo := "repo1"
+	if out, err := pgbRun("get", "postgrescluster", cluster, "-n", namespace,
+		"-o", "jsonpath={.spec.backups.pgbackrest.repos[0].name}"); err == nil {
+		if r := strings.TrimSpace(string(out)); r != "" {
+			repo = r
+		}
+	}
+	return runAction(triggerBackupArgs(namespace, cluster, repo, stamp))
 }

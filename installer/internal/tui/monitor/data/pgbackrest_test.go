@@ -1,6 +1,7 @@
 package data
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 )
@@ -40,8 +41,35 @@ func TestPgBackrestArgs(t *testing.T) {
 		[]string{"exec", "-n", "cosmos", "cosmos-pg-repo-host-0", "-c", "pgbackrest", "--", "pgbackrest", "info", "--output=json"}) {
 		t.Fatalf("pgbackrestInfoArgs: %v", got)
 	}
-	if got := triggerBackupArgs("cosmos", "cosmos-pg", "2026-06-29T11:00:00Z"); !reflect.DeepEqual(got,
-		[]string{"annotate", "postgrescluster", "cosmos-pg", "-n", "cosmos", "postgres-operator.crunchydata.com/pgbackrest-backup=2026-06-29T11:00:00Z", "--overwrite"}) {
+	got := triggerBackupArgs("cosmos", "cosmos-pg", "repo1", "2026-06-29T11:00:00Z")
+	want := []string{"patch", "postgrescluster", "cosmos-pg", "-n", "cosmos", "--type", "merge", "-p", triggerBackupPatch("repo1", "2026-06-29T11:00:00Z")}
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("triggerBackupArgs: %v", got)
+	}
+}
+
+func TestTriggerBackupPatch(t *testing.T) {
+	var p struct {
+		Metadata struct {
+			Annotations map[string]string `json:"annotations"`
+		} `json:"metadata"`
+		Spec struct {
+			Backups struct {
+				Pgbackrest struct {
+					Manual struct {
+						RepoName string `json:"repoName"`
+					} `json:"manual"`
+				} `json:"pgbackrest"`
+			} `json:"backups"`
+		} `json:"spec"`
+	}
+	if err := json.Unmarshal([]byte(triggerBackupPatch("repo1", "STAMP")), &p); err != nil {
+		t.Fatalf("patch not valid json: %v", err)
+	}
+	if p.Metadata.Annotations["postgres-operator.crunchydata.com/pgbackrest-backup"] != "STAMP" {
+		t.Fatalf("annotation wrong: %+v", p.Metadata.Annotations)
+	}
+	if p.Spec.Backups.Pgbackrest.Manual.RepoName != "repo1" {
+		t.Fatalf("repoName wrong: %q", p.Spec.Backups.Pgbackrest.Manual.RepoName)
 	}
 }
