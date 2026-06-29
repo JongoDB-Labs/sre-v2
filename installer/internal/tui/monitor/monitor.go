@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strconv"
@@ -141,8 +142,9 @@ func Run(version string, state appcatalog.State) error {
 		"services":  {fetch: m.fetchServices},
 		"alerts":    {fetch: m.fetchAlerts},
 		"falco":     {fetch: m.fetchFalco},
+		"backups":   {fetch: m.fetchBackups},
 	}
-	m.viewOrder = []string{"overview", "nodes", "pods", "workloads", "services", "alerts", "falco", "packages", "apps"}
+	m.viewOrder = []string{"overview", "nodes", "pods", "workloads", "services", "alerts", "falco", "backups", "packages", "apps"}
 	m.view = "overview"
 	m.setHeader("OVERVIEW", 0) // initial header before the first fetch lands
 
@@ -216,6 +218,9 @@ func Run(version string, state appcatalog.State) error {
 			return nil
 		case '8':
 			m.setView("falco")
+			return nil
+		case '9':
+			m.setView("backups")
 			return nil
 		case 'a':
 			// Open the action menu for the selected row (table views only; not while
@@ -871,6 +876,48 @@ func (m *monitor) fetchFalco() tableResult {
 	return res
 }
 
+// fetchBackups builds the backups table from pgBackRest info per PostgresCluster
+// (off the UI goroutine). Errors for individual clusters degrade gracefully (continue)
+// so one unreachable repo-host pod cannot blank the entire view.
+func (m *monitor) fetchBackups() tableResult {
+	raw, err := m.res.PostgresClusters()
+	if err != nil {
+		return tableResult{title: "BACKUPS", notice: "error: " + err.Error(), isError: true}
+	}
+	var list struct {
+		Items []struct {
+			Metadata struct{ Name, Namespace string } `json:"metadata"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &list); err != nil || len(list.Items) == 0 {
+		return tableResult{title: "BACKUPS", notice: "no PostgresCluster found"}
+	}
+	res := tableResult{title: "BACKUPS"}
+	for _, it := range list.Items {
+		ns, cluster := it.Metadata.Namespace, it.Metadata.Name
+		pod, perr := m.res.RepoHostPod(ns, cluster)
+		if perr != nil {
+			continue
+		}
+		info, ierr := m.res.PgBackrestInfo(ns, pod)
+		if ierr != nil {
+			continue
+		}
+		for _, b := range data.BackupRows(info, cluster) {
+			res.rows = append(res.rows, []*tview.TableCell{
+				cell(b.Cluster).SetReference(drillTarget{kind: "postgrescluster", namespace: ns, name: cluster}),
+				cell(b.Label), cell(b.Type), cell(b.Started), cell(b.Size),
+			})
+		}
+	}
+	if len(res.rows) == 0 {
+		res.notice = "no backups (or pgBackRest unreachable)"
+		return res
+	}
+	res.cols = []string{"CLUSTER", "BACKUP", "TYPE", "STARTED", "SIZE"}
+	return res
+}
+
 // liveCell renders the apps-view live flag.
 func liveCell(live bool) *tview.TableCell {
 	if live {
@@ -1134,6 +1181,7 @@ func footerText() string {
 		"[#FFFFFF::b]3[-:-:-] [#7C8694]nodes[-]   [#FFFFFF::b]4[-:-:-] [#7C8694]pods[-]   " +
 		"[#FFFFFF::b]5[-:-:-] [#7C8694]workloads[-]   [#FFFFFF::b]6[-:-:-] [#7C8694]services[-]   " +
 		"[#FFFFFF::b]7[-:-:-] [#7C8694]alerts[-]   [#FFFFFF::b]8[-:-:-] [#7C8694]falco[-]   " +
+		"[#FFFFFF::b]9[-:-:-] [#7C8694]backups[-]   " +
 		"[#FFFFFF::b]Tab[-:-:-] [#7C8694]cycle[-]   [#FFFFFF::b]j/k[-:-:-] [#7C8694]move[-]   " +
 		"[#FFFFFF::b]a[-:-:-] [#7C8694]actions[-]   " +
 		"[#FFFFFF::b]:[-:-:-] [#7C8694]jump[-]   [#FFFFFF::b]q[-:-:-] [#7C8694]quit[-]"
