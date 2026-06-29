@@ -27,6 +27,10 @@ type Resources interface {
 	SetCordon(node string, cordon bool) (string, int, error)
 	Scale(kind, namespace, name string, replicas int) (string, int, error)
 	Delete(kind, namespace, name string) (string, int, error)
+	PostgresClusters() ([]byte, error)
+	RepoHostPod(namespace, cluster string) (string, error)
+	PgBackrestInfo(namespace, pod string) ([]byte, error)
+	TriggerBackup(namespace, cluster, stamp string) (string, int, error)
 }
 
 type execResources struct{}

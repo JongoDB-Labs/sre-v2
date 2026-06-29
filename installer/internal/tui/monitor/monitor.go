@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strconv"
@@ -103,8 +104,11 @@ func Run(version string, state appcatalog.State) error {
 		app: app, state: state, table: table, header: header,
 		version: version, ctx: "…",
 		main: main, overviewTV: overviewTV, prom: prom,
-		res:     data.NewResources(),
-		auditor: data.NewFileAuditor(data.AuditPath()),
+		res: data.NewResources(),
+		auditor: data.NewMultiAuditor(
+			data.NewFileAuditor(data.AuditPath()),
+			data.NewConfigMapAuditor("sre-system", "srectl-platform-actions"),
+		),
 	}
 	m.cmdBar = cmdBar
 	m.detail = detail
@@ -138,8 +142,9 @@ func Run(version string, state appcatalog.State) error {
 		"services":  {fetch: m.fetchServices},
 		"alerts":    {fetch: m.fetchAlerts},
 		"falco":     {fetch: m.fetchFalco},
+		"backups":   {fetch: m.fetchBackups},
 	}
-	m.viewOrder = []string{"overview", "nodes", "pods", "workloads", "services", "alerts", "falco", "packages", "apps"}
+	m.viewOrder = []string{"overview", "nodes", "pods", "workloads", "services", "alerts", "falco", "backups", "packages", "apps"}
 	m.view = "overview"
 	m.setHeader("OVERVIEW", 0) // initial header before the first fetch lands
 
@@ -213,6 +218,9 @@ func Run(version string, state appcatalog.State) error {
 			return nil
 		case '8':
 			m.setView("falco")
+			return nil
+		case '9':
+			m.setView("backups")
 			return nil
 		case 'a':
 			// Open the action menu for the selected row (table views only; not while
@@ -868,6 +876,48 @@ func (m *monitor) fetchFalco() tableResult {
 	return res
 }
 
+// fetchBackups builds the backups table from pgBackRest info per PostgresCluster
+// (off the UI goroutine). Errors for individual clusters degrade gracefully (continue)
+// so one unreachable repo-host pod cannot blank the entire view.
+func (m *monitor) fetchBackups() tableResult {
+	raw, err := m.res.PostgresClusters()
+	if err != nil {
+		return tableResult{title: "BACKUPS", notice: "error: " + err.Error(), isError: true}
+	}
+	var list struct {
+		Items []struct {
+			Metadata struct{ Name, Namespace string } `json:"metadata"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &list); err != nil || len(list.Items) == 0 {
+		return tableResult{title: "BACKUPS", notice: "no PostgresCluster found"}
+	}
+	res := tableResult{title: "BACKUPS"}
+	for _, it := range list.Items {
+		ns, cluster := it.Metadata.Namespace, it.Metadata.Name
+		pod, perr := m.res.RepoHostPod(ns, cluster)
+		if perr != nil {
+			continue
+		}
+		info, ierr := m.res.PgBackrestInfo(ns, pod)
+		if ierr != nil {
+			continue
+		}
+		for _, b := range data.BackupRows(info, cluster) {
+			res.rows = append(res.rows, []*tview.TableCell{
+				cell(b.Cluster).SetReference(drillTarget{kind: "postgrescluster", namespace: ns, name: cluster}),
+				cell(b.Label), cell(b.Type), cell(b.Started), cell(b.Size),
+			})
+		}
+	}
+	if len(res.rows) == 0 {
+		res.notice = "no backups (or pgBackRest unreachable)"
+		return res
+	}
+	res.cols = []string{"CLUSTER", "BACKUP", "TYPE", "STARTED", "SIZE"}
+	return res
+}
+
 // liveCell renders the apps-view live flag.
 func liveCell(live bool) *tview.TableCell {
 	if live {
@@ -901,13 +951,15 @@ type action struct {
 func (m *monitor) actionsFor(dt drillTarget) []action {
 	switch dt.kind {
 	case "pods":
-		return []action{{
-			label: "Restart", auditAction: "restart-pod",
-			kind: dt.kind, namespace: dt.namespace, name: dt.name,
-			command: fmt.Sprintf("kubectl delete pod -n %s %s", dt.namespace, dt.name),
-			preview: fmt.Sprintf("Restart pod %s/%s?\n\nDeletes the pod; its controller recreates it.", dt.namespace, dt.name),
-			exec:    func() (string, int, error) { return m.res.DeletePod(dt.namespace, dt.name) },
-		}}
+		return []action{
+			{label: "Restart", auditAction: "restart-pod",
+				kind: dt.kind, namespace: dt.namespace, name: dt.name,
+				command: fmt.Sprintf("kubectl delete pod -n %s %s", dt.namespace, dt.name),
+				preview: fmt.Sprintf("Restart pod %s/%s?\n\nDeletes the pod; its controller recreates it.", dt.namespace, dt.name),
+				exec:    func() (string, int, error) { return m.res.DeletePod(dt.namespace, dt.name) }},
+			{label: "Delete", auditAction: "delete", needsTypedName: true,
+				kind: dt.kind, namespace: dt.namespace, name: dt.name},
+		}
 	case "deployments", "statefulsets":
 		return []action{
 			{label: "Rollout restart", auditAction: "rollout-restart",
@@ -943,6 +995,15 @@ func (m *monitor) actionsFor(dt drillTarget) []action {
 				preview: fmt.Sprintf("Uncordon node %s?\n\nMarks it schedulable again.", dt.name),
 				exec:    func() (string, int, error) { return m.res.SetCordon(dt.name, false) }},
 		}
+	case "postgrescluster":
+		stamp := time.Now().UTC().Format(time.RFC3339)
+		return []action{{
+			label: "Trigger backup", auditAction: "trigger-backup",
+			kind: dt.kind, namespace: dt.namespace, name: dt.name,
+			command: fmt.Sprintf("kubectl patch postgrescluster %s -n %s (manual pgBackRest backup)", dt.name, dt.namespace),
+			preview: fmt.Sprintf("Trigger an on-demand pgBackRest backup of %s/%s?\n\nPGO starts a backup job; nothing is destroyed.", dt.namespace, dt.name),
+			exec:    func() (string, int, error) { return m.res.TriggerBackup(dt.namespace, dt.name, stamp) },
+		}}
 	}
 	return nil
 }
@@ -1076,9 +1137,19 @@ func (m *monitor) showScaleInput(a action) {
 // operator must type the resource's exact name to confirm. On match it runs the
 // action via the shared executePending (off-UI + audited). Fresh form per call.
 func (m *monitor) showTypedConfirm(a action) {
+	// The confirm prompt lives in a wrapping TextView, NOT the input-field label:
+	// a long resource name in a field label overflows the dialog border (tview does
+	// not wrap/truncate form-field labels). The field itself uses an empty label and
+	// fill width (0) so it always stays inside the box, whatever the name length.
+	prompt := tview.NewTextView().
+		SetText(fmt.Sprintf("Type \"%s\" to confirm:", a.name)).
+		SetWrap(true)
+	prompt.SetTextColor(consoleText)
+	prompt.SetBackgroundColor(consoleBg)
+
 	form := tview.NewForm()
 	form.SetBackgroundColor(consoleBg)
-	form.AddInputField(fmt.Sprintf("Type \"%s\" to confirm", a.name), "", 40, nil, nil)
+	form.AddInputField("", "", 0, nil, nil) // empty label + fill width → contained in the box
 	form.AddButton("Delete", func() {
 		typed := strings.TrimSpace(form.GetFormItem(0).(*tview.InputField).GetText())
 		if typed != a.name {
@@ -1092,12 +1163,18 @@ func (m *monitor) showTypedConfirm(a action) {
 		m.executePending()
 	})
 	form.AddButton("Cancel", func() { m.closeModal() })
-	form.SetBorder(true).
+	form.SetButtonsAlign(tview.AlignCenter)
+
+	// Prompt (wrapping) above the form, both inside one bordered box.
+	box := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(prompt, 2, 0, false).
+		AddItem(form, 0, 1, true)
+	box.SetBorder(true).
 		SetTitle(fmt.Sprintf(" ⚠ Delete %s/%s ", a.kind, a.name)).
 		SetTitleColor(statusRed)
-	form.SetButtonsAlign(tview.AlignCenter)
-	// Center the form over "main" with a Grid (transparent margins).
-	grid := tview.NewGrid().SetColumns(0, 56, 0).SetRows(0, 11, 0).AddItem(form, 1, 1, 1, 1, 0, 0, true)
+	box.SetBackgroundColor(consoleBg)
+	// Center the dialog over "main" with a Grid (transparent margins).
+	grid := tview.NewGrid().SetColumns(0, 56, 0).SetRows(0, 12, 0).AddItem(box, 1, 1, 1, 1, 0, 0, true)
 	m.root.RemovePage("modal")
 	m.root.AddPage("modal", grid, true, true)
 	m.modalActive = true
@@ -1129,6 +1206,7 @@ func footerText() string {
 		"[#FFFFFF::b]3[-:-:-] [#7C8694]nodes[-]   [#FFFFFF::b]4[-:-:-] [#7C8694]pods[-]   " +
 		"[#FFFFFF::b]5[-:-:-] [#7C8694]workloads[-]   [#FFFFFF::b]6[-:-:-] [#7C8694]services[-]   " +
 		"[#FFFFFF::b]7[-:-:-] [#7C8694]alerts[-]   [#FFFFFF::b]8[-:-:-] [#7C8694]falco[-]   " +
+		"[#FFFFFF::b]9[-:-:-] [#7C8694]backups[-]   " +
 		"[#FFFFFF::b]Tab[-:-:-] [#7C8694]cycle[-]   [#FFFFFF::b]j/k[-:-:-] [#7C8694]move[-]   " +
 		"[#FFFFFF::b]a[-:-:-] [#7C8694]actions[-]   " +
 		"[#FFFFFF::b]:[-:-:-] [#7C8694]jump[-]   [#FFFFFF::b]q[-:-:-] [#7C8694]quit[-]"
