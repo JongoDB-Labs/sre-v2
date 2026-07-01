@@ -1,0 +1,224 @@
+# View ② — Substrate internals (granular drill-down)
+# C4 Component altitude: every named component in its namespace boundary.
+# Source: bundle/uds-bundle.yaml v1.7.0, packages/pgo/zarf.yaml 6.0.2,
+#         packages/minio/zarf.yaml 7.1.1, docs/platform-runbook.md
+...@_theme
+
+direction: down
+
+# ─── Title ────────────────────────────────────────────────────────────────────
+title: "SRE-v2 / UDS Core — Substrate Internals\n(View ②: granular component drill-down)" {
+  near: top-center
+  class: title
+}
+
+# ─── Host / RKE2 node ─────────────────────────────────────────────────────────
+host: "Host Node (RKE2 single-node lab · Ubuntu 24.04)" {
+  class: boundary
+
+  host-note: "kernel ≥5.8 · swap off · /dev/kmsg" { class: note }
+
+  # RKE2 node daemons
+  rke2: "RKE2" {
+    class: substrate
+    containerd: containerd { class: substrate }
+    kubelet: kubelet { class: substrate }
+    coredns: CoreDNS { class: substrate }
+    kube-proxy: kube-proxy { class: substrate }
+  }
+
+  # ─── Platform add-ons (pre-UDS-Core) ────────────────────────────────────────
+  platform-addons: "Platform Add-ons" {
+    class: boundary
+
+    sc-note: "RKE2 has no default StorageClass — #1" { class: note }
+    lb-note: "no cloud LB — #2" { class: note }
+
+    local-path: local-path-provisioner { class: substrate }
+    metallb: MetalLB {
+      class: substrate
+      ippool: IPAddressPool { class: substrate }
+      l2adv: L2Advertisement { class: substrate }
+    }
+    cert-manager: cert-manager { class: substrate }
+    metrics-server: metrics-server { class: substrate }
+  }
+
+  # ─── Zarf airgap bootstrap ──────────────────────────────────────────────────
+  zarf-bootstrap: "Zarf Airgap Bootstrap (init package)" {
+    class: boundary
+
+    zarf-injector: zarf-injector { class: substrate }
+    zarf-seed-registry: zarf-seed-registry { class: substrate }
+    zarf-registry: zarf-registry { class: substrate }
+    zarf-agent: "zarf-agent (mutating webhook)" { class: substrate }
+  }
+
+  # ─── UDS Core — functional namespace layers ──────────────────────────────────
+
+  # core-base: Istio ambient mesh + Pepr uds-operator + CRDs
+  core-base: "Namespace: istio-system / core-base" {
+    class: boundary
+
+    istiod: istiod { class: substrate }
+    ztunnel: ztunnel { class: substrate }
+    istio-cni: istio-cni { class: substrate }
+
+    gateways: "Gateways" {
+      class: boundary
+      tenant: tenant { class: substrate }
+      admin: admin { class: substrate }
+      passthrough: passthrough { class: substrate }
+      egress: egress { class: substrate }
+      egress-ambient: egress-ambient { class: substrate }
+    }
+
+    waypoints: "Waypoints" {
+      class: boundary
+      keycloak-waypoint: keycloak-waypoint { class: substrate }
+      customer-waypoint: customer-waypoint { class: substrate }
+    }
+
+    pepr-system: "Namespace: pepr-system (Pepr)" {
+      class: boundary
+      pepr-uds-operator: "Pepr UDS Operator (Watcher+Admission)" { class: substrate }
+      policy-engine: "Policy Engine" { class: substrate }
+    }
+
+    crds: "CRDs" {
+      class: boundary
+      pkg-crd: "Package · Exemption · ClusterConfig" { class: substrate }
+    }
+  }
+
+  # core-identity-authorization: Keycloak + Authservice
+  core-identity: "Namespace: keycloak / core-identity-authorization" {
+    class: boundary
+
+    keycloak: "Keycloak (realm uds)" { class: substrate }
+    authservice: Authservice { class: substrate }
+    kc-postgres: "Keycloak Postgres" { class: external }
+  }
+
+  # core-runtime-security: Falco (UDS Core 1.7; NeuVector removed)
+  core-runtime-security: "Namespace: falco / core-runtime-security (Falco)" {
+    class: boundary
+
+    falco: Falco { class: substrate }
+    falcosidekick: FalcoSidekick { class: substrate }
+  }
+
+  # core-monitoring: kube-prometheus-stack + Grafana
+  core-monitoring: "Namespace: monitoring / core-monitoring" {
+    class: boundary
+
+    prometheus: Prometheus { class: substrate }
+    prometheus-operator: prometheus-operator { class: substrate }
+    alertmanager: Alertmanager { class: substrate }
+    kube-state-metrics: kube-state-metrics { class: substrate }
+    node-exporter: node-exporter { class: substrate }
+    blackbox-exporter: blackbox-exporter { class: substrate }
+    grafana: Grafana { class: substrate }
+  }
+
+  # core-logging: Vector + Loki — DEFERRED (not yet deployed; not in bundle)
+  core-logging: "Namespace: logging / core-logging (deferred — later slice)" {
+    class: boundary
+
+    logging-deferred-note: "(deferred — not yet deployed)" { class: note }
+    vector: Vector { class: substrate }
+    loki: "Loki (gateway/read/write/backend)" { class: substrate }
+    logging-s3: "S3 (log storage)" { class: external }
+  }
+
+  # core-backup-restore: Velero — DEFERRED (not yet deployed; not in bundle)
+  core-backup-restore: "Namespace: velero / core-backup-restore (deferred — later slice)" {
+    class: boundary
+
+    backup-deferred-note: "(deferred — not yet deployed)" { class: note }
+    velero: Velero { class: substrate }
+    backup-s3: "S3 (backup storage)" { class: external }
+  }
+
+  # ─── Data-service operators ─────────────────────────────────────────────────
+  data-operators: "Data-Service Operators" {
+    class: boundary
+
+    postgres-operator: "Namespace: postgres-operator" {
+      class: boundary
+      pgo: "PGO 6.0.2" { class: substrate }
+      pgo-note: "images: pg16.14 + pgvector · pgbackrest 2.58" { class: note }
+    }
+
+    minio-operator: "Namespace: minio-operator" {
+      class: boundary
+      minio: "MinIO operator 7.1.1" { class: substrate }
+      minio-note: "lab only; prod = external FIPS S3" { class: note }
+    }
+  }
+
+  # ─── Control plane ──────────────────────────────────────────────────────────
+  control-plane: "Control Plane (srectl + catalog)" {
+    class: boundary
+
+    srectl: "srectl + catalog.yaml" { class: substrate }
+    srectl-note: "round-1: install substrate; round-2: cosign-verify app install" { class: note }
+    exemptions: "Exemptions" { class: note }
+    exemptions-note: "narrow admin-owned escapes: #4–#7 (MetalLB speaker, local-path helper-pod)" { class: note }
+  }
+}
+
+# ─── Image-flavor note ────────────────────────────────────────────────────────
+flavor-note: "image flavors: upstream (lab) · registry1 (Iron Bank/DoD)" { class: note }
+
+# ─── Edges: deploy / bootstrap flow ──────────────────────────────────────────
+host.zarf-bootstrap.zarf-injector -> host.zarf-bootstrap.zarf-seed-registry: "seed"
+host.zarf-bootstrap.zarf-seed-registry -> host.zarf-bootstrap.zarf-registry: "promote"
+host.zarf-bootstrap.zarf-agent -> host.rke2: "mutates pod images"
+
+# Zarf init seeds registries, then UDS Core layers deploy on top
+host.zarf-bootstrap -> host.core-base: "deploys"
+host.core-base -> host.core-identity: "deploys"
+host.core-identity -> host.core-runtime-security: "deploys"
+host.core-runtime-security -> host.core-monitoring: "deploys"
+host.core-base -> host.core-logging: "deploys"
+host.core-base -> host.core-backup-restore: "deploys"
+host.zarf-bootstrap -> host.data-operators: "deploys"
+
+# Control plane drives deployment
+host.control-plane.srectl -> host.zarf-bootstrap: "round-1 install"
+host.control-plane.srectl -> host.core-base: "round-2 app verify + install"
+
+# Exemptions feeds into Pepr
+host.control-plane.exemptions -> host.core-base.pepr-system: "admin-grants"
+
+# ─── Observability edges (class: obs) ─────────────────────────────────────────
+host.core-monitoring.prometheus -> host.rke2: "scrape node metrics" { class: obs }
+host.core-monitoring.prometheus -> host.core-base.istiod: "scrape mesh metrics" { class: obs }
+host.core-monitoring.prometheus -> host.core-identity.keycloak: "scrape" { class: obs }
+host.core-monitoring.prometheus -> host.core-runtime-security.falco: "scrape alerts" { class: obs }
+host.core-monitoring.grafana -> host.core-monitoring.prometheus: "query" { class: obs }
+host.core-logging.vector -> host.rke2: "collect logs" { class: obs }
+host.core-logging.vector -> host.core-logging.loki: "ship logs" { class: obs }
+host.core-logging.loki -> host.core-logging.logging-s3: "persist" { class: obs }
+host.core-backup-restore.velero -> host.core-backup-restore.backup-s3: "store backups" { class: obs }
+
+# Authservice → Keycloak OIDC
+host.core-identity.authservice -> host.core-identity.keycloak: "OIDC"
+host.core-identity.keycloak -> host.core-identity.kc-postgres: "persists realm data"
+
+# MinIO external wiring
+host.core-logging.logging-s3: "S3 (log storage)" { class: external }
+host.core-backup-restore.backup-s3: "S3 (backup storage)" { class: external }
+
+# ─── Legend ──────────────────────────────────────────────────────────────────
+legend: "Legend" {
+  near: bottom-center
+  class: boundary
+
+  l-substrate: "substrate component" { class: substrate }
+  l-boundary: "namespace boundary" { class: boundary }
+  l-external: "external service" { class: external }
+  l-note: "annotation / gotcha" { class: note }
+  l-obs: "observability / scrape" { class: obs }
+}

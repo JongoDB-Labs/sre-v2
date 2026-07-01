@@ -1,0 +1,102 @@
+# View ① — System-of-Systems Poster
+# C4 System Landscape altitude: master map; each drill-down links back to band IDs here.
+# Import shared theme (classes + vars).
+...@_theme
+
+direction: right
+
+# ─── Title ───────────────────────────────────────────────────────────────────
+title: "SRE-v2 / cosmos-v2 — System of Systems\n(View ①: Landscape)" {
+  near: top-center
+  class: title
+}
+
+# ─── Band 1: Repos ───────────────────────────────────────────────────────────
+repos: "Repos\n(SOPS-encrypted secrets)" {
+  class: boundary
+
+  sre-v2: sre-v2 { class: source }
+  cosmos-v2: cosmos-v2 { class: source }
+}
+
+# ─── Band 2: CI ──────────────────────────────────────────────────────────────
+ci: "CI / DevSecOps\n(→ drill-down ④)" {
+  class: boundary
+
+  build: build { class: ci }
+  test: test { class: ci }
+  scan: scan { class: ci }
+  sbom: sbom { class: ci }
+  sign-attest: "sign + attest" { class: ci }
+}
+
+# ─── Band 3: GHCR ────────────────────────────────────────────────────────────
+ghcr: "GHCR / OCI Registry" {
+  class: boundary
+
+  signed-images: "signed images" { class: artifact }
+  oci-helm: "OCI Helm charts" { class: artifact }
+  uds-bundles: "UDS/Zarf bundles" { class: artifact }
+}
+
+# ─── Band 4: Delivery ────────────────────────────────────────────────────────
+delivery: "Delivery\n(→ drill-down ⑤)" {
+  class: boundary
+
+  flux: "Flux (connected)" { class: gitops }
+  gate: "signed-approval gate ◆" { class: gate }
+  zarf: "Zarf/UDS (airgap)" { class: gitops }
+}
+
+# ─── Band 5: Substrate (collapsed — detail in ②) ─────────────────────────────
+substrate: "SRE-v2 · UDS Core + PGO/MinIO on RKE2\n(→ drill-down ②)" {
+  class: substrate
+
+  substrate-summary: "RKE2 · Istio · Flux\nKeycloak · Falco · CrunchyData PGO\nMinIO Operator" {
+    class: substrate
+  }
+}
+
+# ─── Band 6: App (collapsed — detail in ③) ───────────────────────────────────
+app: "app-on-substrate\n(→ drill-down ③)" {
+  class: app
+
+  app-summary: "Deployment + PGO + MinIO\n+ UDS Package (uds-package.yaml)" {
+    class: app
+  }
+}
+
+# ─── Band 7: Envs (collapsed — detail in ⑥) ──────────────────────────────────
+envs: "Environments\n(→ drill-down ⑥)" {
+  class: env
+
+  dev: "dev\ncosmos.uds.dev" { class: env }
+  prod-pontis: "prod · pontis.fightingsmartcyber.com\n(Compose)" { class: env }
+  prod-defcon: "prod · defcon.fightingsmartcyber.com\n(Compose)" { class: env }
+  no-staging: "no staging" { class: note }
+}
+
+# ─── Edges: left-to-right pipeline flow ──────────────────────────────────────
+repos -> ci: "push / PR triggers"
+ci -> ghcr: "push artifacts"
+ghcr -> delivery: "pull signed OCI"
+delivery -> substrate: "deploy substrate"
+substrate -> app: "runs on"
+app -> envs: "promote right"
+
+# ─── Legend ──────────────────────────────────────────────────────────────────
+legend: "Legend" {
+  near: bottom-center
+  class: boundary
+
+  l-source: "source repo" { class: source }
+  l-ci: "CI step" { class: ci }
+  l-artifact: "OCI artifact" { class: artifact }
+  l-gitops: "GitOps / Zarf" { class: gitops }
+  l-substrate: "substrate layer" { class: substrate }
+  l-app: "app layer" { class: app }
+  l-env: "environment" { class: env }
+  l-gate: "control gate ◆" { class: gate }
+  l-note: "annotation" { class: note }
+  l-boundary: "band / boundary" { class: boundary }
+}
