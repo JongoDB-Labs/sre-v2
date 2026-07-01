@@ -6,118 +6,135 @@
 # Sources: cosmos-v2/.github/workflows/security.yml + release.yml
 ...@_theme
 
-direction: right
-
 # ─── Title ────────────────────────────────────────────────────────────────────
 title: "cosmos-v2 — DevSecOps Supply Chain\n(View ④: DoD Fig-2 pipeline · CMMC L2 · SLSA Build L2/L3)" {
   near: top-center
   class: title
 }
 
-# ─── Phase row: Plan ◆ Build ◆ Test ◆ Release ◆ Deploy ───────────────────────
-# Five phases with four control-gate diamonds between each adjacent pair.
-phase-plan: Plan { class: ci }
-gate-1: "Go/No-Go ◆" { class: gate }
-phase-build: Build { class: ci }
-gate-2: "Go/No-Go ◆" { class: gate }
-phase-test: Test { class: ci }
-gate-3: "Go/No-Go ◆" { class: gate }
-phase-release: Release { class: ci }
-gate-4: "Go/No-Go ◆" { class: gate }
-phase-deploy: Deploy { class: ci }
+# ─── Three-band grid: phase row / security band / supply chain (top → bottom) ─
+pipeline: {
+  grid-rows: 3
+  grid-gap: 60
 
-phase-plan -> gate-1: "code ready"
-gate-1 -> phase-build: "approved"
-phase-build -> gate-2: "build clean"
-gate-2 -> phase-test: "approved"
-phase-test -> gate-3: "tests pass"
-gate-3 -> phase-release: "approved"
-phase-release -> gate-4: "artifact signed"
-gate-4 -> phase-deploy: "approved"
+  # ── Band 1: Phase row: Plan ◆ Build ◆ Test ◆ Release ◆ Deploy ──────────────
+  # Five phases with four control-gate diamonds between each adjacent pair.
+  phase-row: "DevSecOps Phase Pipeline" {
+    class: boundary
+    grid-rows: 1
+    grid-gap: 20
 
-# ─── Continuous Security Automation band ──────────────────────────────────────
-# Full-width boundary containing the 8 CMMC-mapped security gates from security.yml.
-# Control IDs ground each gate to NIST 800-171 requirements.
-security-band: "Continuous Security Automation  (runs on every push / PR — security.yml)" {
-  class: boundary
+    phase-plan: Plan { class: ci }
+    gate-1: "Go/No-Go ◆" { class: gate }
+    phase-build: Build { class: ci }
+    gate-2: "Go/No-Go ◆" { class: gate }
+    phase-test: Test { class: ci }
+    gate-3: "Go/No-Go ◆" { class: gate }
+    phase-release: Release { class: ci }
+    gate-4: "Go/No-Go ◆" { class: gate }
+    phase-deploy: Deploy { class: ci }
 
-  # Gate 1 — SAST / CodeQL  ·  800-171 3.11.2 / 3.14.1
-  sg-codeql: "SAST / CodeQL\n(JS/TS; SARIF evidence)" { class: ci }
-  sg-codeql-note: "3.11.2 / 3.14.1\nHard gate" { class: note }
+    phase-plan -> gate-1: "code ready"
+    gate-1 -> phase-build: "approved"
+    phase-build -> gate-2: "build clean"
+    gate-2 -> phase-test: "approved"
+    phase-test -> gate-3: "tests pass"
+    gate-3 -> phase-release: "approved"
+    phase-release -> gate-4: "artifact signed"
+    gate-4 -> phase-deploy: "approved"
+  }
 
-  # Gate 2 — SCA / Trivy + OSV  ·  800-171 3.11.2 (HARD on Critical)
-  sg-sca: "SCA / Trivy+OSV\n(lockfile + fs; HARD on Critical)" { class: ci }
-  sg-sca-note: "3.11.2\nPOA&M on High" { class: note }
+  # ── Band 2: Continuous Security Automation band ─────────────────────────────
+  # Full-width boundary containing the 8 CMMC-mapped security gates from security.yml.
+  # 8 columns × 2 rows: row 1 = gates, row 2 = control-id notes (aligned columns).
+  security-band: "Continuous Security Automation  (runs on every push / PR — security.yml)" {
+    class: boundary
+    grid-columns: 8
+    grid-gap: 20
 
-  # Gate 3 — Secrets / gitleaks  ·  800-171 3.5.1 / 3.5.2 (HARD — any finding fails)
-  sg-secrets: "secrets / gitleaks\n(full history; pinned CLI)" { class: ci }
-  sg-secrets-note: "3.5.1 / 3.5.2\nHard gate" { class: note }
+    # Row 1 — the 8 security gates (ordered left to right)
+    # Gate 1 — SAST / CodeQL  ·  800-171 3.11.2 / 3.14.1
+    sg-codeql: "SAST / CodeQL\n(JS/TS; SARIF evidence)" { class: ci }
 
-  # Gate 4 — Image CVE / Trivy image  ·  800-171 3.11.2 (HARD on Critical)
-  sg-image-cve: "image-CVE / Trivy\n(single cosmos-v2 image; HARD)" { class: ci }
-  sg-image-cve-note: "3.11.2\nHard on Critical" { class: note }
+    # Gate 2 — SCA / Trivy + OSV  ·  800-171 3.11.2 (HARD on Critical)
+    sg-sca: "SCA / Trivy+OSV\n(lockfile + fs; HARD on Critical)" { class: ci }
 
-  # Gate 5 — IaC / hadolint + Checkov  ·  800-171 3.4.1 / 3.4.2 (Info — never blocks)
-  sg-iac: "IaC / hadolint+Checkov\n(Dockerfile + manifests; Info)" { class: ci }
-  sg-iac-note: "3.4.1 / 3.4.2\nInfo (never blocks)" { class: note }
+    # Gate 3 — Secrets / gitleaks  ·  800-171 3.5.1 / 3.5.2 (HARD — any finding fails)
+    sg-secrets: "secrets / gitleaks\n(full history; pinned CLI)" { class: ci }
 
-  # Gate 6 — SBOM / Syft  ·  800-171 3.4.x (component inventory)
-  sg-sbom: "SBOM / Syft\n(SPDX-JSON; OCI-attached)" { class: ci }
-  sg-sbom-note: "3.4.x\nComponent inventory" { class: note }
+    # Gate 4 — Image CVE / Trivy image  ·  800-171 3.11.2 (HARD on Critical)
+    sg-image-cve: "image-CVE / Trivy\n(single cosmos-v2 image; HARD)" { class: ci }
 
-  # Gate 7 — sign + provenance  ·  800-171 3.4.x / 3.14.x
-  sg-sign: "sign + provenance\n(cosign keyless + KMS; SLSA attest)" { class: ci }
-  sg-sign-note: "3.4.x / 3.14.x\nIntegrity + supply chain" { class: note }
+    # Gate 5 — IaC / hadolint + Checkov  ·  800-171 3.4.1 / 3.4.2 (Info — never blocks)
+    sg-iac: "IaC / hadolint+Checkov\n(Dockerfile + manifests; Info)" { class: ci }
 
-  # Gate 8 — config assertions  ·  800-171 3.1.1 / 3.4.x (HARD — SHA-pin enforcement)
-  sg-config: "config-assertions\n(SHA-pin · E2E-auth · control-coverage)" { class: ci }
-  sg-config-note: "3.1.1 / 3.4.x\nHard gate" { class: note }
+    # Gate 6 — SBOM / Syft  ·  800-171 3.4.x (component inventory)
+    sg-sbom: "SBOM / Syft\n(SPDX-JSON; OCI-attached)" { class: ci }
 
-  # Note captions associated with gates
-  sg-codeql -> sg-codeql-note: "" { class: alt }
-  sg-sca -> sg-sca-note: "" { class: alt }
-  sg-secrets -> sg-secrets-note: "" { class: alt }
-  sg-image-cve -> sg-image-cve-note: "" { class: alt }
-  sg-iac -> sg-iac-note: "" { class: alt }
-  sg-sbom -> sg-sbom-note: "" { class: alt }
-  sg-sign -> sg-sign-note: "" { class: alt }
-  sg-config -> sg-config-note: "" { class: alt }
-}
+    # Gate 7 — sign + provenance  ·  800-171 3.4.x / 3.14.x
+    sg-sign: "sign + provenance\n(cosign keyless + KMS; SLSA attest)" { class: ci }
 
-# ─── release.yml supply chain ─────────────────────────────────────────────────
-# Sequence: native multi-arch build → merge manifest → Syft SBOM → cosign
-# keyless + KMS → SLSA attest → verify-after-sign ◆ → GHCR artifact
-supply-chain: "release.yml  supply chain  (triggers on v* tag)" {
-  class: boundary
+    # Gate 8 — config assertions  ·  800-171 3.1.1 / 3.4.x (HARD — SHA-pin enforcement)
+    sg-config: "config-assertions\n(SHA-pin · E2E-auth · control-coverage)" { class: ci }
 
-  # Build step — no QEMU; native amd64 + arm64 runners, push by digest
-  sc-build: "native multi-arch build\n(no QEMU · amd64+arm64 by digest)" { class: ci }
+    # Row 2 — control-id note captions (one per gate, same column order)
+    sg-codeql-note: "3.11.2 / 3.14.1\nHard gate" { class: note }
+    sg-sca-note: "3.11.2\nPOA&M on High" { class: note }
+    sg-secrets-note: "3.5.1 / 3.5.2\nHard gate" { class: note }
+    sg-image-cve-note: "3.11.2\nHard on Critical" { class: note }
+    sg-iac-note: "3.4.1 / 3.4.2\nInfo (never blocks)" { class: note }
+    sg-sbom-note: "3.4.x\nComponent inventory" { class: note }
+    sg-sign-note: "3.4.x / 3.14.x\nIntegrity + supply chain" { class: note }
+    sg-config-note: "3.1.1 / 3.4.x\nHard gate" { class: note }
 
-  # Merge manifests — assemble multi-arch manifest list, apply SemVer + :latest tags
-  sc-merge: "merge manifest\n(imagetools · SemVer + :latest + :sha-<sha>)" { class: ci }
+    # Note captions associated with gates (alt = de-emphasized dashed link)
+    sg-codeql -> sg-codeql-note: "" { class: alt }
+    sg-sca -> sg-sca-note: "" { class: alt }
+    sg-secrets -> sg-secrets-note: "" { class: alt }
+    sg-image-cve -> sg-image-cve-note: "" { class: alt }
+    sg-iac -> sg-iac-note: "" { class: alt }
+    sg-sbom -> sg-sbom-note: "" { class: alt }
+    sg-sign -> sg-sign-note: "" { class: alt }
+    sg-config -> sg-config-note: "" { class: alt }
+  }
 
-  # SBOM — Syft SPDX-JSON of merged runtime image, gate 6
-  sc-sbom: "Syft SBOM\n(SPDX-JSON · OCI-attached)" { class: ci }
+  # ── Band 3: release.yml supply chain ───────────────────────────────────────
+  # Sequence: native multi-arch build → merge manifest → Syft SBOM → cosign
+  # keyless + KMS → SLSA attest → verify-after-sign ◆ → GHCR artifact
+  supply-chain: "release.yml  supply chain  (triggers on v* tag)" {
+    class: boundary
+    grid-rows: 1
+    grid-gap: 20
 
-  # Sign — cosign keyless (OIDC → Fulcio/Rekor) always; KMS additionally
-  sc-cosign: "cosign keyless + KMS\n(OIDC → Fulcio/Rekor + KMS when configured)" { class: ci }
+    # Build step — no QEMU; native amd64 + arm64 runners, push by digest
+    sc-build: "native multi-arch build\n(no QEMU · amd64+arm64 by digest)" { class: ci }
 
-  # SLSA attestation — bound to merged runtime manifest digest
-  sc-slsa: "SLSA attest\n(actions/attest-build-provenance)" { class: ci }
+    # Merge manifests — assemble multi-arch manifest list, apply SemVer + :latest tags
+    sc-merge: "merge manifest\n(imagetools · SemVer + :latest + :sha-<sha>)" { class: ci }
 
-  # verify-after-sign gate — re-resolve digest, confirm sig present; re-sign if missing
-  sc-verify: "verify-after-sign ◆\n(re-resolve digest · fail if unverifiable)" { class: gate }
+    # SBOM — Syft SPDX-JSON of merged runtime image, gate 6
+    sc-sbom: "Syft SBOM\n(SPDX-JSON · OCI-attached)" { class: ci }
 
-  # Final artifact — GHCR: images (runtime + migrate + postgres) + OCI chart + UDS bundle
-  sc-ghcr: "GHCR: images · OCI chart · UDS bundle\n(cosmos-v2 · cosmos-v2-migrate · cosmos-v2-postgres)" { class: artifact }
+    # Sign — cosign keyless (OIDC → Fulcio/Rekor) always; KMS additionally
+    sc-cosign: "cosign keyless + KMS\n(OIDC → Fulcio/Rekor + KMS when configured)" { class: ci }
 
-  # Supply chain flow edges
-  sc-build -> sc-merge: "per-arch digests"
-  sc-merge -> sc-sbom: "merged digest"
-  sc-sbom -> sc-cosign: "SBOM attached"
-  sc-cosign -> sc-slsa: "sig attached"
-  sc-slsa -> sc-verify: "provenance attached"
-  sc-verify -> sc-ghcr: "verified"
+    # SLSA attestation — bound to merged runtime manifest digest
+    sc-slsa: "SLSA attest\n(actions/attest-build-provenance)" { class: ci }
+
+    # verify-after-sign gate — re-resolve digest, confirm sig present; re-sign if missing
+    sc-verify: "verify-after-sign ◆\n(re-resolve digest · fail if unverifiable)" { class: gate }
+
+    # Final artifact — GHCR: images (runtime + migrate + postgres) + OCI chart + UDS bundle
+    sc-ghcr: "GHCR: images · OCI chart · UDS bundle\n(cosmos-v2 · cosmos-v2-migrate · cosmos-v2-postgres)" { class: artifact }
+
+    # Supply chain flow edges
+    sc-build -> sc-merge: "per-arch digests"
+    sc-merge -> sc-sbom: "merged digest"
+    sc-sbom -> sc-cosign: "SBOM attached"
+    sc-cosign -> sc-slsa: "sig attached"
+    sc-slsa -> sc-verify: "provenance attached"
+    sc-verify -> sc-ghcr: "verified"
+  }
 }
 
 # SLSA spine caption
@@ -129,18 +146,18 @@ slsa-note: "SLSA: Source → Build → Package → Consumer · Build L2/L3" { cl
 fulcio: "Fulcio\n(OIDC cert authority)" { class: external }
 rekor: "Rekor\n(WORM transparency log)" { class: external }
 
-# Edges from cosign to Sigstore infrastructure
-supply-chain.sc-cosign -> fulcio: "OIDC → cert"
-supply-chain.sc-cosign -> rekor: "inclusion proof"
+# Edges from cosign to Sigstore infrastructure (obs = de-emphasized cross-band)
+pipeline.supply-chain.sc-cosign -> fulcio: "OIDC → cert" { class: obs }
+pipeline.supply-chain.sc-cosign -> rekor: "inclusion proof" { class: obs }
 
 # ─── Phase row → supply chain cross-links ─────────────────────────────────────
 # Tie phase row to supply-chain bands to show what fires in each phase
-phase-build -> supply-chain.sc-build: "triggers build"
-phase-release -> supply-chain.sc-cosign: "sign + publish"
+pipeline.phase-row.phase-build -> pipeline.supply-chain.sc-build: "triggers build" { class: obs }
+pipeline.phase-row.phase-release -> pipeline.supply-chain.sc-cosign: "sign + publish" { class: obs }
 
 # ─── Security band → supply chain cross-links ─────────────────────────────────
-security-band.sg-sbom -> supply-chain.sc-sbom: "gate 6 → release SBOM" { class: obs }
-security-band.sg-sign -> supply-chain.sc-cosign: "gate 7 → sign step" { class: obs }
+pipeline.security-band.sg-sbom -> pipeline.supply-chain.sc-sbom: "gate 6 → release SBOM" { class: obs }
+pipeline.security-band.sg-sign -> pipeline.supply-chain.sc-cosign: "gate 7 → sign step" { class: obs }
 
 # ─── Legend ──────────────────────────────────────────────────────────────────
 legend: "Legend" {
