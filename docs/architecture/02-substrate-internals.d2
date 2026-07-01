@@ -100,13 +100,12 @@ host: "Host Node (RKE2 single-node lab · Ubuntu 24.04)" {
     kc-postgres: "Keycloak Postgres" { class: external }
   }
 
-  # core-runtime-security: Falco + NeuVector
-  core-runtime-security: "Namespace: falco / core-runtime-security" {
+  # core-runtime-security: Falco (UDS Core 1.7; NeuVector removed)
+  core-runtime-security: "Namespace: falco / core-runtime-security (Falco)" {
     class: boundary
 
     falco: Falco { class: substrate }
     falcosidekick: FalcoSidekick { class: substrate }
-    neuvector: "NeuVector (controller/enforcer/manager/scanner)" { class: substrate }
   }
 
   # core-monitoring: kube-prometheus-stack + Grafana
@@ -122,19 +121,21 @@ host: "Host Node (RKE2 single-node lab · Ubuntu 24.04)" {
     grafana: Grafana { class: substrate }
   }
 
-  # core-logging: Vector + Loki
-  core-logging: "Namespace: logging / core-logging" {
+  # core-logging: Vector + Loki — DEFERRED (not yet deployed; not in bundle)
+  core-logging: "Namespace: logging / core-logging (deferred — later slice)" {
     class: boundary
 
+    logging-deferred-note: "(deferred — not yet deployed)" { class: note }
     vector: Vector { class: substrate }
     loki: "Loki (gateway/read/write/backend)" { class: substrate }
     logging-s3: "S3 (log storage)" { class: external }
   }
 
-  # core-backup-restore: Velero
-  core-backup-restore: "Namespace: velero / core-backup-restore" {
+  # core-backup-restore: Velero — DEFERRED (not yet deployed; not in bundle)
+  core-backup-restore: "Namespace: velero / core-backup-restore (deferred — later slice)" {
     class: boundary
 
+    backup-deferred-note: "(deferred — not yet deployed)" { class: note }
     velero: Velero { class: substrate }
     backup-s3: "S3 (backup storage)" { class: external }
   }
