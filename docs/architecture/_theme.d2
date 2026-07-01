@@ -1,0 +1,34 @@
+# _theme.d2 — shared legend, colors, and element classes for the SRE-v2 suite.
+# Every view imports this:  ...@_theme
+# Color roles per spec §2.2. Nesting = trust boundary; ◆ = control gate.
+vars: {
+  d2-config: {
+    layout-engine: elk
+    pad: 40
+  }
+}
+
+classes: {
+  # --- color roles (fills) ---
+  source:    { style: { fill: "#3f3f46"; stroke: "#18181b"; font-color: "#fafafa"; border-radius: 6 } }
+  ci:        { style: { fill: "#1e40af"; stroke: "#1e3a8a"; font-color: "#eff6ff"; border-radius: 6 } }
+  artifact:  { style: { fill: "#5b21b6"; stroke: "#4c1d95"; font-color: "#f5f3ff"; border-radius: 6 } }
+  gitops:    { style: { fill: "#92400e"; stroke: "#78350f"; font-color: "#fffbeb"; border-radius: 6 } }
+  substrate: { style: { fill: "#0f5132"; stroke: "#052e16"; font-color: "#ecfdf5"; border-radius: 6 } }
+  app:       { style: { fill: "#7f1d1d"; stroke: "#450a0a"; font-color: "#fef2f2"; border-radius: 6 } }
+  env:       { style: { fill: "#166534"; stroke: "#14532d"; font-color: "#f0fdf4"; border-radius: 6 } }
+  external:  { style: { fill: "#52525b"; stroke: "#3f3f46"; font-color: "#e4e4e7"; border-radius: 6; stroke-dash: 2 } }
+
+  # --- structural ---
+  boundary:  { style: { fill: transparent; stroke: "#94a3b8"; stroke-dash: 4; font-color: "#cbd5e1"; border-radius: 8 } }
+  gate:      { shape: diamond; style: { fill: "#b45309"; stroke: "#78350f"; font-color: "#fffbeb" } }
+  note:      { shape: page; style: { fill: "#1f2937"; stroke: "#374151"; font-color: "#e5e7eb"; font-size: 11; italic: true } }
+
+  # --- edge classes (applied to connections) ---
+  obs:       { style: { stroke: "#38bdf8"; stroke-dash: 3; font-color: "#7dd3fc" } }   # observability flows
+  alt:       { style: { stroke: "#a1a1aa"; stroke-dash: 5 } }                          # alternative/airgap path
+  gap:       { style: { stroke: "#dc2626"; stroke-dash: 6; font-color: "#fca5a5"; stroke-width: 2 } }  # current→target gap
+}
+
+# Reusable legend block — each view instantiates `legend` and fills rows it uses.
+# Views place it bottom-left. Keep entries to the classes actually used in the view.
