@@ -1,0 +1,131 @@
+# View ⑤ — GitOps & delivery / update model
+# Three delivery lanes sharing one GHCR artifact source:
+#   A: Connected (Flux pull-reconcile loop)
+#   B: Airgap (Zarf/UDS offline bundle)
+#   C: Today (manual pull, pre-Flux interim)
+# Plus: Day-2/ConMon console + signed-approval update gate
+# Sources: fluxcd.io, OpenGitOps 4 principles, docs.zarf.dev, cosign --offline
+...@_theme
+
+# ─── Title ────────────────────────────────────────────────────────────────────
+title: "cosmos-v2 — GitOps & Delivery / Update Model\n(View ⑤: three lanes · Flux · Zarf/UDS · Day-2/ConMon console)" {
+  near: top-center
+  class: title
+}
+
+# ─── Shared GHCR artifact source (feeds all three lanes) ─────────────────────
+ghcr: "GHCR signed artifacts\n(images · OCI chart · UDS bundle)" {
+  class: artifact
+}
+
+# ─── Three-lane grid (top → bottom) ──────────────────────────────────────────
+lanes: {
+  grid-rows: 3
+  grid-gap: 60
+
+  # ── Lane A — Connected (Flux GitOps) ───────────────────────────────────────
+  # OpenGitOps 4 principles: declarative, versioned, pulled, continuously reconciled
+  lane-a: "Connected · Flux GitOps  (fluxcd.io · OpenGitOps 4 principles)" {
+    class: boundary
+    grid-rows: 1
+    grid-gap: 20
+
+    git-oci: "Git/OCI source\n(GitHub · GHCR OCI chart)" { class: gitops }
+
+    src-ctrl: "Source Controller\n(Flux · watches Git/OCI ref)" { class: gitops }
+
+    helm-ctrl: "Helm/Kustomize Controller\n(Flux · plans delta)" { class: gitops }
+
+    cluster-a: "cluster" {
+      class: boundary
+
+      reconcile-loop: "observe→compare→apply→report\n(Flux reconcile loop)" { class: gitops }
+    }
+
+    git-oci -> src-ctrl: "ref resolved"
+    src-ctrl -> helm-ctrl: "artifact fetched"
+    helm-ctrl -> cluster-a.reconcile-loop: "apply delta"
+    cluster-a.reconcile-loop -> helm-ctrl: "report status" { class: obs }
+  }
+
+  # ── Lane B — Airgap (Zarf/UDS) ─────────────────────────────────────────────
+  # Zarf init/injector pattern: docs.zarf.dev/docs/deploy-a-zarf-package
+  lane-b: "Airgap · Zarf/UDS  (docs.zarf.dev · cosign --offline)" {
+    class: boundary
+    grid-rows: 1
+    grid-gap: 20
+
+    zarf-create: "uds/zarf create\n(bundle artifact + dependencies)" { class: gitops }
+
+    offline-gate: "cosign --offline verify ◆\n(signature check before crossing)" { class: gate }
+
+    airgap: "air-gap" {
+      class: boundary
+
+      injector: "injector\n(Zarf seed container)" { class: gitops }
+
+      in-cluster-reg: "in-cluster registry\n(Zarf internal OCI)" { class: gitops }
+
+      mutating-webhook: "mutating-webhook rewrite\n(redirect image refs → in-cluster)" { class: gitops }
+
+      deploy: "deploy\n(helm upgrade via Zarf)" { class: gitops }
+
+      injector -> in-cluster-reg: "push seed images" { class: alt }
+      in-cluster-reg -> mutating-webhook: "serve rewritten refs" { class: alt }
+      mutating-webhook -> deploy: "rewritten pull" { class: alt }
+    }
+
+    zarf-create -> offline-gate: "bundle ready" { class: alt }
+    offline-gate -> airgap.injector: "verified · cross gap" { class: alt }
+  }
+
+  # ── Lane C — Today (manual pull, pre-Flux interim) ─────────────────────────
+  lane-c: "Today · manual pull  (pre-Flux interim)" {
+    class: boundary
+    grid-rows: 1
+    grid-gap: 20
+
+    manual-pull: "manual uds/helm pull\n(pre-Flux interim — operator CLI)" { class: note }
+
+    manual-cluster: "cluster\n(helm upgrade on target host)" { class: gitops }
+
+    manual-pull -> manual-cluster: "operator runs upgrade" { class: alt }
+  }
+}
+
+# ─── Day-2 / ConMon console + update gate overlay ────────────────────────────
+conmon: "Day-2 / ConMon console\n(app-hosted · continuous monitoring · oscal evidence)" { class: app }
+
+update-gate: "signed approval update gate ◆\n(policy check + change-ticket sign-off)" { class: gate }
+
+# Observability surfaces from ConMon to live cluster components
+grafana: "Grafana\n(metrics dashboards)" { class: external }
+falco: "Falco\n(runtime threat detection)" { class: external }
+flux: "Flux\n(reconcile status + alerts)" { class: external }
+
+conmon -> update-gate: "propose update"
+update-gate -> lanes.lane-a.cluster-a.reconcile-loop: "approved — trigger reconcile" { class: obs }
+conmon -> grafana: "surfaces" { class: obs }
+conmon -> falco: "surfaces" { class: obs }
+conmon -> flux: "surfaces" { class: obs }
+
+# ─── GHCR source feeds all three lanes ───────────────────────────────────────
+ghcr -> lanes.lane-a.git-oci: "pull (OCI chart ref)"
+ghcr -> lanes.lane-b.zarf-create: "bundle input" { class: alt }
+ghcr -> lanes.lane-c.manual-pull: "image + chart" { class: alt }
+
+# ─── Legend ──────────────────────────────────────────────────────────────────
+legend: "Legend" {
+  near: bottom-center
+  class: boundary
+
+  l-artifact: "GHCR signed artifact" { class: artifact }
+  l-gitops: "GitOps component (Flux/Zarf)" { class: gitops }
+  l-gate: "control gate ◆ (go/no-go)" { class: gate }
+  l-app: "app-hosted console" { class: app }
+  l-external: "external / observed service" { class: external }
+  l-boundary: "delivery lane / boundary" { class: boundary }
+  l-note: "interim / annotation" { class: note }
+  l-obs: "observability / reconcile signal" { class: obs }
+  l-alt: "airgap / interim path" { class: alt }
+}
