@@ -97,24 +97,70 @@ substrate** (Deployment + PGO + MinIO + UDS Package) → **environments**
 (dev → prod, promote right). Each band names its drill-down (②–⑥).
 *Replaces the current poster.*
 
-### ② Substrate internals (`sre-v2`) — *C4 Container*
-The nitty-gritty of what the substrate IS. Cluster boundary containing one
-namespace box per UDS Core layer (from `bundle/uds-bundle.yaml` v1.7.0):
-- **core-base** — Istio **ambient** (`istiod`, `ztunnel`, `istio-cni`) + gateways
-  (**tenant**, **admin**, passthrough, egress) + waypoints; **Pepr** (UDS
-  Operator + Policy Engine: default-deny + mutate-to-nonroot + `Exemption` CRs).
-- **core-identity-authorization** — Keycloak (realm `uds`) + Authservice.
-- **core-runtime-security** — Falco (+ Falco UI).
-- **core-monitoring** — Prometheus/Alertmanager/Grafana (+ Loki/Vector, Jaeger).
-- **PGO** (`packages/pgo`, 6.0.2) & **MinIO** operator (`packages/minio`, 7.1.1)
-  — cluster-wide data-service operators; per-app CRs live in ③.
-- **Zarf init** — in-cluster registry + mutating agent.
+### ② Substrate internals (`sre-v2`) — *C4 Container (maximum granularity)*
+The nitty-gritty of what the substrate IS. This view is intentionally the most
+detailed of the suite. Boundaries nest: **Host/node → RKE2 → cluster-platform
+add-ons → UDS Core functional layers (one namespace box each) → data-service
+operators**. From `bundle/uds-bundle.yaml` (v1.7.0), `packages/`, and the
+gotcha catalog in `docs/platform-runbook.md`.
+
+**Host / node layer**
+- **RKE2** (single-node lab; HA target) — `containerd`, `kubelet`, CoreDNS,
+  kube-proxy; kernel ≥5.8 (Falco modern-eBPF), swap off, `/dev/kmsg`.
+
+**Cluster-platform add-ons** (the RKE2 "batteries not included" gaps —
+runbook gotchas #1/#2/#7)
+- **local-path-provisioner** — RKE2 ships **no default StorageClass**; installed
+  and marked default (ns labeled `zarf.dev/agent=ignore`).
+- **MetalLB** — RKE2 has **no cloud LoadBalancer**; L2 mode + `IPAddressPool` /
+  `L2Advertisement` back the admin & tenant gateway `EXTERNAL-IP`s.
+- **cert-manager** — TLS issuance (gateway certs, operator webhooks, ACME/CA).
+- **metrics-server** — HPA/`kubectl top` (UDS Core functional layer).
+
+**UDS Core functional layers** (each its own namespace box)
+- **core-base** — Istio **ambient**: `istiod`, `ztunnel` (per-node L4),
+  `istio-cni`; gateway namespaces **tenant**, **admin**, **passthrough**,
+  **egress** (sidecar) / **egress-ambient**; L7 **waypoint** proxies
+  (`keycloak-waypoint`, `customer-waypoint`). **Pepr** (`pepr-system`): UDS
+  Operator (Watcher + Admission) + Policy Engine — **default-deny** netpol,
+  mutate-to-non-root, host-ns/host-port/NET_RAW denial. **CRDs**: `Package`,
+  `Exemption`, `ClusterConfig`.
+- **core-identity-authorization** — **Keycloak** (realm `uds`, external Postgres,
+  on-demand bootstrap-admin) + **Authservice** (OIDC filter for non-OIDC apps,
+  admin gateway).
+- **core-runtime-security** — **Falco** + FalcoSidekick **and NeuVector**
+  (controller / enforcer / manager / scanner) — runtime-security & ConMon signal.
+- **core-monitoring** — **Prometheus** (+ prometheus-operator, Alertmanager,
+  kube-state-metrics, node-exporter, blackbox-exporter) + **Grafana**;
+  ServiceMonitors/PrometheusRules as `observability`-tagged flows.
+- **core-logging** — **Vector** (collector) → **Loki** (gateway/read/write/
+  backend, S3-backed).
+- **core-backup-restore** — **Velero** (S3-backed).
+
+**Data-service operators** (cluster-wide; per-app CRs live in ③)
+- **PGO** (`packages/pgo`, 6.0.2, ns `postgres-operator`) — carried images
+  postgres-operator ubi9-6.0.2, crunchy-postgres 16.14 (pgvector),
+  crunchy-pgbackrest 2.58.
+- **MinIO operator** (`packages/minio`, 7.1.1, ns `minio-operator`) — lab/baseline
+  only (archived upstream; prod = external FIPS S3).
+
+**Airgap bootstrap (Zarf)**
+- `zarf-injector` (Rust) → `zarf-seed-registry` → `zarf-registry` (in-cluster
+  OCI) + **`zarf-agent`** mutating webhook (rewrites image/git refs).
+
+**Control plane / tooling**
 - **srectl + catalog.yaml** — round-1 installer (preflight→posture→sizing→
   services→SSO→secrets→render `uds-config.yaml`+`values.overlay.yaml`→deploy) and
   round-2 app-install flow (resolve→**cosign verify**→preflight→`uds deploy`→
   record→confirm).
-Callouts: admin vs tenant gateway split; default-deny + narrow exemptions;
-image flavors `upstream` (lab) vs `registry1` (Iron Bank/DoD).
+- **Narrow admission `Exemption`s** (admin-owned, a distinct callout) — the
+  documented escapes for infra: local-path helper-pod (RestrictVolumeTypes),
+  host-ns/NET_RAW, non-root mutation on privileged infra (runbook #4–#7).
+
+Callouts: admin vs tenant gateway split; default-deny + **narrow** exemptions
+(a feature, not a workaround); image flavors `upstream` (lab) vs `registry1`
+(Iron Bank/DoD). *This is the "very granular" view — show every named component
+above as its own box inside its namespace boundary.*
 
 ### ③ App-on-substrate contract (cosmos-v2 as reference) — *C4 Container→Component*
 The **reusable contract** any compatible app implements. App namespace box
