@@ -7,13 +7,8 @@ direction: right
 
 # ─── Title ───────────────────────────────────────────────────────────────────
 title: "SRE-v2 / cosmos-v2 — System of Systems\n(View ①: Landscape)" {
-  shape: text
   near: top-center
-  style: {
-    font-size: 24
-    bold: true
-    font-color: "#cbd5e1"
-  }
+  class: title
 }
 
 # ─── Band 1: Repos ───────────────────────────────────────────────────────────
@@ -55,13 +50,7 @@ delivery: "Delivery\n(→ drill-down ⑤)" {
 
 # ─── Band 5: Substrate (collapsed — detail in ②) ─────────────────────────────
 substrate: "SRE-v2 · UDS Core + PGO/MinIO on RKE2\n(→ drill-down ②)" {
-  class: boundary
-  style: {
-    fill: "#0f5132"
-    stroke: "#052e16"
-    font-color: "#ecfdf5"
-    border-radius: 8
-  }
+  class: substrate
 
   substrate-summary: "RKE2 · Istio · Flux\nKeycloak · Falco · CrunchyData PGO\nMinIO Operator" {
     class: substrate
@@ -70,13 +59,7 @@ substrate: "SRE-v2 · UDS Core + PGO/MinIO on RKE2\n(→ drill-down ②)" {
 
 # ─── Band 6: App (collapsed — detail in ③) ───────────────────────────────────
 app: "app-on-substrate\n(→ drill-down ③)" {
-  class: boundary
-  style: {
-    fill: "#7f1d1d"
-    stroke: "#450a0a"
-    font-color: "#fef2f2"
-    border-radius: 8
-  }
+  class: app
 
   app-summary: "Deployment + PGO + MinIO\n+ UDS Package (.release.yml)" {
     class: app
@@ -85,16 +68,10 @@ app: "app-on-substrate\n(→ drill-down ③)" {
 
 # ─── Band 7: Envs (collapsed — detail in ⑥) ──────────────────────────────────
 envs: "Environments\n(→ drill-down ⑥)" {
-  class: boundary
-  style: {
-    fill: "#166534"
-    stroke: "#14532d"
-    font-color: "#f0fdf4"
-    border-radius: 8
-  }
+  class: env
 
   dev: "dev\ncosmos.uds.dev" { class: env }
-  prod-pontis: "prod · pontis.\n(k8s/UDS)" { class: env }
+  prod-pontis: "prod · pontis.fightingsmartcyber.com\n(Compose)" { class: env }
   prod-defcon: "prod · defcon.fightingsmartcyber.com\n(Compose)" { class: env }
   no-staging: "no staging" { class: note }
 }
@@ -109,7 +86,7 @@ app -> envs: "promote right"
 
 # ─── Legend ──────────────────────────────────────────────────────────────────
 legend: "Legend" {
-  near: bottom-left
+  near: bottom-center
   class: boundary
 
   l-source: "source repo" { class: source }
