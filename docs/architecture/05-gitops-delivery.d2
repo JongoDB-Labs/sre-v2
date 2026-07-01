@@ -103,14 +103,14 @@ grafana: "Grafana\n(metrics dashboards)" { class: external }
 falco: "Falco\n(runtime threat detection)" { class: external }
 flux: "Flux\n(reconcile status + alerts)" { class: external }
 
-conmon -> update-gate: "propose update"
+conmon -> update-gate: "propose update" { class: obs }
 update-gate -> lanes.lane-a.cluster-a.reconcile-loop: "approved — trigger reconcile" { class: obs }
 conmon -> grafana: "surfaces" { class: obs }
 conmon -> falco: "surfaces" { class: obs }
 conmon -> flux: "surfaces" { class: obs }
 
 # ─── GHCR source feeds all three lanes ───────────────────────────────────────
-ghcr -> lanes.lane-a.git-oci: "pull (OCI chart ref)"
+ghcr -> lanes.lane-a.git-oci: "pull (OCI chart ref)" { class: alt }
 ghcr -> lanes.lane-b.zarf-create: "bundle input" { class: alt }
 ghcr -> lanes.lane-c.manual-pull: "image + chart" { class: alt }
 
