@@ -45,3 +45,15 @@ Bootstrapped 2026-06-26 by splitting the substrate out of `cosmos-v2`. A live
 reference deployment (RKE2 + full UDS Core, 12 vCPU / 62 GiB) already runs and is
 documented in `cosmos-v2/docs/deploy/uds-rke2-setup.md` (migrating into `docs/`).
 See [`docs/MIGRATION.md`](docs/MIGRATION.md) for what's moving and the build order.
+
+---
+
+## License
+
+Licensed under the **GNU Affero General Public License v3.0** — see
+[LICENSE](LICENSE) for the full text.
+
+AGPL-3.0 is a network copyleft license: if you modify this software and make it
+available to users over a network, you must also offer those users the
+corresponding source. For alternative licensing terms, open an issue to start a
+conversation.
