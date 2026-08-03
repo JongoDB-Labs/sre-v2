@@ -1,0 +1,132 @@
+# View ③ — App-on-substrate contract
+# C4 Component altitude: the reusable contract any compatible app implements
+# to integrate with the substrate's auth/ingress/backend/monitoring.
+# Reference app: cosmos-v2  (charts/cosmos/templates/)
+# Import shared theme (classes + vars).
+...@_theme
+
+direction: down
+
+# ─── Title ───────────────────────────────────────────────────────────────────
+title: "cosmos-v2 — App-on-Substrate Contract\n(View ③: app→substrate wiring)" {
+  near: top-center
+  class: title
+}
+
+# ─── Contract caption ────────────────────────────────────────────────────────
+contract-caption: "Any compatible app supplies:\nHelm chart + UDS Package CR + PostgresCluster/Tenant + migrate hook" {
+  class: note
+  near: top-left
+}
+
+# ─── App namespace: cosmos ───────────────────────────────────────────────────
+cosmos: "Namespace: cosmos  (app boundary)" {
+  class: app
+
+  # Workload
+  deployment: "Deployment + Service" {
+    class: app
+  }
+  deployment-note: "non-root · /api/health probes · digest-pinned image" {
+    class: note
+  }
+
+  # Database
+  postgres: "PostgresCluster (PGO)" {
+    class: app
+  }
+  postgres-note: "v16+pgvector · cosmos superuser + least-priv cosmos_app\npgBackRest repo1(+repo2→S3)" {
+    class: note
+  }
+
+  # Object storage
+  minio: "MinIO Tenant" {
+    class: app
+  }
+  minio-note: "buckets: uploads · pgbackrest · audit-worm (WORM)" {
+    class: note
+  }
+
+  # Lifecycle hooks
+  migrate: "migrate hook Job" {
+    class: app
+  }
+  migrate-note: "pre-install: init creates cosmos_app → prisma migrate deploy" {
+    class: note
+  }
+
+  # Compliance
+  audit-cron: "verify-audit-chain CronJob" {
+    class: app
+  }
+  audit-note: "AU-9 · every 6h" {
+    class: note
+  }
+
+  # UDS integration point
+  uds-pkg: "UDS Package CR" {
+    class: app
+  }
+}
+
+# ─── Substrate boundary (external — detail in View ②) ────────────────────────
+substrate-ext: "substrate (view ②)" {
+  class: external
+
+  virtual-svc: "VirtualService\n(cosmos.uds.dev, tenant gw)" {
+    class: external
+  }
+
+  keycloak-client: "Keycloak client\n(OIDC PKCE)" {
+    class: external
+  }
+
+  service-monitor: "ServiceMonitor" {
+    class: external
+  }
+}
+
+# ─── Gotcha notes ─────────────────────────────────────────────────────────────
+gotcha-minio: "portless MinIO egress 443→9000 (#15)" {
+  class: note
+}
+
+gotcha-kubeapi: "KubeAPI egress for Patroni" {
+  class: note
+}
+
+gotcha-keycloak: "Keycloak egress via tenant gateway (#10)" {
+  class: note
+}
+
+# ─── Intra-app wiring ─────────────────────────────────────────────────────────
+cosmos.deployment -> cosmos.postgres: "psql/TLS"
+cosmos.deployment -> cosmos.minio: "S3"
+cosmos.migrate -> cosmos.postgres: "init + prisma migrate"
+cosmos.audit-cron -> cosmos.minio: "verify audit-worm chain"
+
+# ─── UDS Package CR → substrate expose/sso/monitor edges ─────────────────────
+cosmos.uds-pkg -> substrate-ext.virtual-svc: "expose"
+cosmos.uds-pkg -> substrate-ext.keycloak-client: "sso"
+cosmos.uds-pkg -> substrate-ext.service-monitor: "monitor" { class: obs }
+
+# ─── App → Keycloak OIDC (runtime) ────────────────────────────────────────────
+cosmos.deployment -> substrate-ext.keycloak-client: "OIDC/HTTPS"
+
+# ─── Gotcha associations ─────────────────────────────────────────────────────
+cosmos.minio -> gotcha-minio: "" { class: alt }
+cosmos.postgres -> gotcha-kubeapi: "" { class: alt }
+substrate-ext.keycloak-client -> gotcha-keycloak: "" { class: alt }
+
+# ─── Legend ──────────────────────────────────────────────────────────────────
+legend: "Legend" {
+  near: bottom-center
+  class: boundary
+
+  l-app: "app namespace resource" { class: app }
+  l-external: "substrate (external boundary)" { class: external }
+  l-note: "annotation / gotcha" { class: note }
+  l-obs: "observability / monitor" { class: obs }
+  l-alt: "gotcha reference" { class: alt }
+  l-boundary: "namespace boundary" { class: boundary }
+}

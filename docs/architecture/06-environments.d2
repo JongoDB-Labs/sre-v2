@@ -1,0 +1,84 @@
+# View ⑥ — Environments & promotion (CURRENT vs TARGET)
+# HONESTY CONSTRAINT:
+#   dev/lab = cosmos-k8s / cosmos.uds.dev  → live RKE2 + UDS Core (views ②③ run here today)
+#   prod    = pontis.fightingsmartcyber.com + defcon.fightingsmartcyber.com
+#             BOTH still on Docker Compose + cloudflared→Caddy (live data, NOT yet on k8s/UDS)
+#   NO staging environment exists
+#   SP10 = future prod-on-k8s/UDS cutover (gap arrow → dashed target node)
+...@_theme
+
+# ─── Title ────────────────────────────────────────────────────────────────────
+title: "cosmos-v2 — Environments & Promotion\n(View ⑥: CURRENT vs TARGET · honest state · SP10 cutover ahead)" {
+  near: top-center
+  class: title
+}
+
+# ─── No-staging note ──────────────────────────────────────────────────────────
+no-staging: "no staging environment exists\n(dev → prod is the only current promotion path)" {
+  class: note
+}
+
+# ─── dev / lab ────────────────────────────────────────────────────────────────
+dev: "dev / lab\ncosmos-k8s / cosmos.uds.dev\n\nlive RKE2 + UDS Core — runs views ②③ today\nbaseline image · Flux pull-reconcile · signed artifacts" {
+  class: env
+}
+
+# ─── prod boundary (CURRENT STATE: Docker Compose) ────────────────────────────
+prod-boundary: "prod  (CURRENT: Docker Compose)" {
+  class: boundary
+
+  pontis: "pontis.fightingsmartcyber.com\n\nDocker Compose (live data) · cloudflared→Caddy\nDoD-facing Pontis / ĒSO skin" {
+    class: env
+  }
+
+  defcon: "defcon.fightingsmartcyber.com\n\nDocker Compose (live data) · cloudflared→Caddy\ncosmos/DoD face · Proxmox VM #124 · v2.92.0" {
+    class: env
+  }
+}
+
+# ─── Posture note ─────────────────────────────────────────────────────────────
+posture: "Security posture\nbaseline (upstream) vs DoD (registry1/Iron Bank · FIPS · strict netpol · 1095-day audit)\nSP10 cutover will migrate prod to DoD posture" {
+  class: note
+}
+
+# ─── TARGET: prod on k8s/UDS (future — SP10 cutover) ─────────────────────────
+prod-k8s: "prod on k8s/UDS\n(TARGET — not yet deployed)\nRKE2 + UDS Core · DoD posture · FIPS · signed artifacts\ncosmos-chart + UDS Package" {
+  class: external
+}
+
+# ─── Airgapped DoD enclave (future) ──────────────────────────────────────────
+future: "airgapped DoD enclave\n(external S3 · offline verify)\nZarf/UDS bundle · cosign --offline · Iron Bank images" {
+  class: external
+}
+
+# ─── Promotion paths ──────────────────────────────────────────────────────────
+# dev → prod (current solid path)
+dev -> prod-boundary: "promote to prod\n(manual helm upgrade / docker compose pull · pre-SP10)"
+
+# SP10 gap: prod-Compose → prod-on-k8s/UDS (the cutover, not yet done)
+prod-boundary -> prod-k8s: "SP10 cutover — backup-first, no data loss\n(RKE2 + UDS Core deployment · explicit per-step auth required)" {
+  class: gap
+}
+
+# prod → airgapped enclave (future alt path)
+prod-k8s -> future: "airgap bundle delivery\n(Zarf/UDS offline · cosign --offline verify)" {
+  class: alt
+}
+
+# posture annotation hangs off dev and prod-k8s
+dev -> posture: "today: baseline upstream image" { class: obs }
+prod-k8s -> posture: "target: DoD posture" { class: obs }
+
+# ─── Legend ──────────────────────────────────────────────────────────────────
+legend: "Legend" {
+  near: bottom-center
+  class: boundary
+
+  l-env: "current environment (live)" { class: env }
+  l-boundary: "environment group / boundary" { class: boundary }
+  l-external: "future / external (dashed)" { class: external }
+  l-note: "annotation / constraint" { class: note }
+  l-gap: "SP10 gap — current→target (red dashed)" { class: note }
+  l-obs: "observability / annotation edge (blue dashed)" { class: note }
+  l-alt: "airgap / alternate path (grey dashed)" { class: note }
+}
