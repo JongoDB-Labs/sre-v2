@@ -21,6 +21,11 @@ components:
         url: oci://registry.developers.crunchydata.com/crunchydata/pgo
         version: 6.0.2
         namespace: postgres-operator
+    manifests:
+      - name: pgo-uds-package
+        namespace: postgres-operator
+        files:
+          - uds-package.yaml
     images:
       - registry.developers.crunchydata.com/crunchydata/postgres-operator:ubi9-6.0.2-0
       # Postgres-instance images apps' PostgresClusters pull — the substrate carries
