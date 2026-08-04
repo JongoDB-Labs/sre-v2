@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestExecZarf_BuildsInspectCommand(t *testing.T) {
+func TestExecZarf_BuildsRegistryDigestCommand(t *testing.T) {
 	var gotName string
 	var gotArgs []string
 	orig := commandContext
@@ -17,14 +17,14 @@ func TestExecZarf_BuildsInspectCommand(t *testing.T) {
 	}
 	defer func() { commandContext = orig }()
 
-	if _, err := (execZarf{}).Inspect("ghcr.io/x/cosmos"); err != nil {
-		t.Fatalf("Inspect: %v", err)
+	if _, err := (execZarf{}).RegistryDigest("ghcr.io/x/bundles/gitea:1.0.0"); err != nil {
+		t.Fatalf("RegistryDigest: %v", err)
 	}
 	if gotName != "zarf" {
 		t.Errorf("binary = %q, want zarf", gotName)
 	}
 	joined := strings.Join(gotArgs, " ")
-	if !strings.Contains(joined, "package inspect") || !strings.Contains(joined, "ghcr.io/x/cosmos") {
-		t.Errorf("args = %v, want a `package inspect <ref>` invocation", gotArgs)
+	if !strings.Contains(joined, "tools registry digest") || !strings.Contains(joined, "ghcr.io/x/bundles/gitea:1.0.0") {
+		t.Errorf("args = %v, want a `tools registry digest <ref>` invocation", gotArgs)
 	}
 }
