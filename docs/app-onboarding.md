@@ -321,7 +321,7 @@ the app's own env/secret-ref surface, `sslmode=verify-full` against PGO's per-cl
 mounted from `<cluster>-cluster-cert`. It worked exactly as designed: acceptance evidence
 shows Postgres reached `4/4 Running` and **`verify-full` TLS proven — `gitea migrate`
 reached PG over verified TLS** (`fixA-report.md`, rev 1.27.0-5 notes; the same driver
-behavior cosmos relies on via `lib/pq`/`PGSSLROOTCERT`, §2 above).
+behavior cosmos relies on via `lib/pq`/`PGSSLROOTCERT`, §3 above).
 
 ### The PG15+ public-schema pattern — why cosmos went SUPERUSER, and the fix every app needs
 
@@ -336,8 +336,7 @@ pq: permission denied for schema public   (SQLSTATE 42501)
 ```
 
 Gitea hit this live at acceptance (`gitea migrate` failing 42501) — and it is now clear in
-hindsight that **this is exactly why the cosmos worked example (§3 above) grants
-`SUPERUSER` and creates its own role in a migrate hook**: SUPERUSER was cosmos's
+hindsight that **this is exactly why the cosmos grants `SUPERUSER` and creates its own role in a migrate hook (see `docs/specs/gitea-onboarding-design.md` §0)**: SUPERUSER was cosmos's
 workaround for the same PG15+ ownership gap, not a cosmos-specific requirement. It is not
 the generic pattern; it just happened to sidestep the problem cosmos never diagnosed.
 
