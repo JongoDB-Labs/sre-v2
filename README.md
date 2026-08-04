@@ -1,4 +1,8 @@
-# sre-v2 — Secure Runtime Environment (v2)
+# ARCIS AEGIS — the Secure Runtime Environment
+
+> *"the shield of the citadel"* — the runtime plane of the **ARCIS** platform
+> family ([family hub](https://github.com/JongoDB-Labs/arcis)). Repo renamed
+> `sre-v2` → `arcis-aegis` 2026-08-04; old URLs redirect.
 
 A UDS-native, DoD-compliant **runtime substrate** for hosting mission applications.
 SRE *is* the platform — ingress, identity, observability, data operators, secrets,
@@ -6,9 +10,9 @@ and lifecycle tooling — onto which business apps are deployed as UDS mission
 packages. The first app is **cosmos** ([cosmos-v2](https://github.com/JongoDB-Labs/cosmos-v2));
 SRE itself is app-agnostic.
 
-> **Naming:** SRE is the *substrate*; `cosmos` is the *app*. "Pontis", "ĒSO",
-> "defcon" are **skins / orgs** using the app — none of them name the substrate
-> or the app.
+> **Naming:** ARCIS AEGIS is the *substrate*; `cosmos`/`gitea` are *apps*
+> (tenants, out-of-family); "Pontis", "ĒSO", "defcon" are **skins / orgs** using
+> the app. Full convention: [arcis/naming.md](https://github.com/JongoDB-Labs/arcis/blob/main/naming.md).
 
 ## Two layers
 

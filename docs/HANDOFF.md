@@ -102,7 +102,7 @@ and security controls (Falco, mesh default-deny, audit hash-chain). Pontis / ĒS
 
 ```
 Resume SRE-v2 substrate development. cwd is a fresh clone of
-git@github.com:JongoDB-Labs/sre-v2.git. Read docs/HANDOFF.md FIRST — it's the
+git@github.com:JongoDB-Labs/arcis-aegis.git (formerly sre-v2). Read docs/HANDOFF.md FIRST — it's the
 consolidated handoff (substrate + DSOP state, roadmap, access prereqs, guardrails).
 Goal: flesh out the substrate + DSOP to onboard a SECOND mission app (not cosmos).
 First moves: (1) re-establish + confirm lab access (ssh cosmos-ssh; kubectl get nodes
