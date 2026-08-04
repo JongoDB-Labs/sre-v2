@@ -17,7 +17,7 @@ apps:
       issuer: "https://token.actions.githubusercontent.com"
     requires: [pgo]
   - name: gitea
-    version: "1.27.0-3"
+    version: "1.27.0-4"
     description: "Gitea — self-hosted git forge (mission app #2, first OSS onboarding)."
     source:
       type: oci
