@@ -28,12 +28,6 @@ type fakeUDS struct {
 func (f *fakeUDS) Deploy(ref string) error  { f.deployed = ref; return f.deployErr }
 func (f *fakeUDS) Remove(name string) error { f.removed = name; return nil }
 
-type fakeInspect struct {
-	out []byte
-	err error
-}
-
-func (f fakeInspect) Inspect(string) ([]byte, error) { return f.out, f.err }
 
 type fakeKube struct {
 	cm           map[string]string
@@ -83,11 +77,26 @@ func testCatalog() *appcatalog.Catalog {
 	}
 }
 
-const inspectWithCRAndDigest = "kind: Package\nmanifestDigest: sha256:" +
-	"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+const (
+	inspectWithCRAndDigest = "kind: Package\nmanifestDigest: sha256:" +
+		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+	bareDigest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+)
+
+type fakeZarfForTests struct {
+	inspectOut  []byte
+	digestOut   []byte
+	err         error
+}
+
+func (f fakeZarfForTests) Inspect(string) ([]byte, error)         { return f.inspectOut, f.err }
+func (f fakeZarfForTests) RegistryDigest(string) ([]byte, error) { return f.digestOut, f.err }
 
 func testDeps(kube *fakeKube, uds *fakeUDS) appDeps {
-	z := fakeInspect{out: []byte(inspectWithCRAndDigest)}
+	z := fakeZarfForTests{
+		inspectOut: []byte(inspectWithCRAndDigest),
+		digestOut:  []byte(bareDigest),
+	}
 	return appDeps{
 		Cat:     testCatalog(),
 		Cosign:  fakeCosign{},
@@ -181,7 +190,7 @@ func TestRunAppStatus_ReportsRecordAndLive(t *testing.T) {
 }
 
 func TestAdapterFor_GitHubDeferred(t *testing.T) {
-	_, err := adapterFor(appcatalog.Entry{Source: appcatalog.Source{Type: appcatalog.SourceGitHub}}, fakeInspect{})
+	_, err := adapterFor(appcatalog.Entry{Source: appcatalog.Source{Type: appcatalog.SourceGitHub}}, fakeZarfForTests{})
 	if err == nil {
 		t.Error("github adapter is deferred and should error")
 	}
@@ -219,9 +228,9 @@ func TestRunAppInstall_PreflightErrorDoesNotAbort(t *testing.T) {
 	uds := &fakeUDS{}
 
 	// Zarf (OCI resolver) succeeds so we get a digest-pinned ref; Cosign passes.
-	zarfOK := fakeInspect{out: []byte(inspectWithCRAndDigest)}
+	zarfOK := fakeZarfForTests{inspectOut: []byte(inspectWithCRAndDigest), digestOut: []byte(bareDigest)}
 	// Inspect (preflight) fails — simulates a transient I/O error in the inspector.
-	inspectFail := fakeInspect{err: errors.New("inspect failed")}
+	inspectFail := fakeZarfForTests{err: errors.New("inspect failed")}
 
 	d := appDeps{
 		Cat:     testCatalog(),
