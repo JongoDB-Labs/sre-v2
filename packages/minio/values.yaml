@@ -1,0 +1,12 @@
+# Values for the UPSTREAM minio-operator chart v7.1.1 (https://operator.min.io).
+# Pins the Tenant init+sidecar image to the ref this package carries (see the
+# `images:` list in zarf.yaml) — without this the chart leaves
+# `operator.sidecarImage` unset, the operator falls back to its compiled-in
+# default (quay.io/minio/operator-sidecar:v7.0.1, see
+# pkg/resources/statefulsets/minio-sidecar.go), and every Tenant pod
+# ImagePullBackOffs under the zarf agent because that ref was never seeded
+# into the cluster registry.
+operator:
+  sidecarImage:
+    repository: quay.io/minio/operator-sidecar
+    tag: v7.0.1
