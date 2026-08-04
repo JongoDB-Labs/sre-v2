@@ -12,12 +12,20 @@ var commandContext = exec.Command
 
 // Zarf is the slice of the `zarf` CLI this package orchestrates. We shell out to
 // zarf — we never reimplement it (spec §3). Tests use a fake Zarf.
+//
+// The interface has two methods due to a compile-time constraint: cmd/srectl/app.go's
+// newAppDeps assigns the same source.Zarf value to both the Zarf field (used by the OCI
+// source adapter) and the Inspect field (which expects appcatalog.Inspector, used by
+// preflight checks). Interface-to-interface assignability requires Inspect in this
+// method set, even though the new OCI resolver (S1) only calls RegistryDigest.
 type Zarf interface {
 	// RegistryDigest returns the OCI manifest digest for a tagged ref, via
 	// `zarf tools registry digest` (embedded crane). Output is one bare
 	// `sha256:…` line — the exact digest cosign signs and verifies.
+	// Used by the oci source adapter to resolve refs to digest-pinned refs.
 	RegistryDigest(ref string) ([]byte, error)
 	// Inspect returns `zarf package inspect <ref>` output (manifest + metadata).
+	// Used by preflight checks via the appcatalog.Inspector interface.
 	Inspect(ref string) ([]byte, error)
 }
 
