@@ -24,8 +24,11 @@ type Zarf interface {
 	// `sha256:…` line — the exact digest cosign signs and verifies.
 	// Used by the oci source adapter to resolve refs to digest-pinned refs.
 	RegistryDigest(ref string) ([]byte, error)
-	// Inspect returns `zarf package inspect <ref>` output (manifest + metadata).
-	// Used by preflight checks via the appcatalog.Inspector interface.
+	// Inspect returns `zarf package inspect definition <ref>` output (manifest +
+	// metadata). zarf >= ~v0.79 requires a subcommand after `package inspect`
+	// ("definition", "sbom", ...); the bare `zarf package inspect <ref>` form
+	// errors on every current zarf. Used by preflight checks via the
+	// appcatalog.Inspector interface.
 	Inspect(ref string) ([]byte, error)
 }
 
@@ -44,11 +47,14 @@ func (execZarf) RegistryDigest(ref string) ([]byte, error) {
 	return out, nil
 }
 
-// Inspect runs `zarf package inspect <ref>` and returns its stdout (for preflight checks).
+// Inspect runs `zarf package inspect definition <ref>` and returns its stdout
+// (for preflight checks). The `definition` subcommand is required on modern
+// zarf (>= ~v0.79) — `zarf package inspect <ref>` alone errors with "requires
+// a subcommand".
 func (execZarf) Inspect(ref string) ([]byte, error) {
-	out, err := commandContext("zarf", "package", "inspect", ref).Output()
+	out, err := commandContext("zarf", "package", "inspect", "definition", ref).Output()
 	if err != nil {
-		return nil, fmt.Errorf("zarf package inspect %s: %w", ref, err)
+		return nil, fmt.Errorf("zarf package inspect definition %s: %w", ref, err)
 	}
 	return out, nil
 }

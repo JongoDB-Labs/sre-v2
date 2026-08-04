@@ -75,6 +75,41 @@ func TestPreflight_InspectErrorIsAdvisoryButReturned(t *testing.T) {
 	}
 }
 
+// TestPreflight_InspectErrorStillWarnsMissingRequire pins the decoupling fix:
+// the missing-require check only needs the live installed-packages set (passed
+// in directly), not zarf inspect output — so it must still run and warn even
+// when inspect fails. Before this fix, an inspect error short-circuited
+// Preflight before the requires loop ever ran, so missing-require warnings
+// were silently skipped on every install (see the gitea onboarding
+// acceptance report's "Secondary finding").
+func TestPreflight_InspectErrorStillWarnsMissingRequire(t *testing.T) {
+	warns, err := Preflight(&fakeInspector{err: errors.New("requires a subcommand")},
+		Entry{Name: "cosmos", Requires: []string{"pgo"}}, "ref",
+		map[string]bool{}) // pgo NOT installed
+	if err == nil {
+		t.Error("an inspect I/O failure should still surface as an error to the caller")
+	}
+	if !hasWarning(warns, "missing-require") {
+		t.Errorf("expected a missing-require warning despite the inspect failure, got %+v", warns)
+	}
+}
+
+// TestPreflight_InspectErrorWithSatisfiedRequiresHasNoWarning is the
+// counterpart: when inspect fails but all requires ARE satisfied, no
+// missing-require warning should fire (and no no-package-cr warning either,
+// since that check genuinely can't run without inspect output).
+func TestPreflight_InspectErrorWithSatisfiedRequiresHasNoWarning(t *testing.T) {
+	warns, err := Preflight(&fakeInspector{err: errors.New("requires a subcommand")},
+		Entry{Name: "cosmos", Requires: []string{"pgo"}}, "ref",
+		map[string]bool{"pgo": true}) // pgo installed
+	if err == nil {
+		t.Error("an inspect I/O failure should still surface as an error to the caller")
+	}
+	if len(warns) != 0 {
+		t.Errorf("expected no warnings when requires are satisfied, got %+v", warns)
+	}
+}
+
 // hasWarning is a small test helper.
 func hasWarning(ws []Warning, code string) bool {
 	for _, w := range ws {
