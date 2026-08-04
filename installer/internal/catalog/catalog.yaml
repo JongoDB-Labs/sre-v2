@@ -49,5 +49,4 @@ operators:
     name: "MinIO object store"
     kind: operator
     required: false
-    status: pending
-    description: "Object storage operator — packaging pending (operator vs shared instance)."
+    description: "Object storage operator (packages/minio) — ships in the bundle; apps provision their own Tenant CRs against it."
