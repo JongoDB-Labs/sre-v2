@@ -1,0 +1,17 @@
+# Makes `requires: [pgo]` truthful (the app-catalog preflight matches live
+# Package CR names) AND brings the operator under default-deny.
+apiVersion: uds.dev/v1alpha1
+kind: Package
+metadata:
+  name: pgo
+  namespace: postgres-operator
+spec:
+  network:
+    allow:
+      - direction: Egress
+        remoteGenerated: KubeAPI
+        description: "operator watch/reconcile + Patroni DCS management"
+      - direction: Egress
+        remoteGenerated: IntraNamespace
+      - direction: Ingress
+        remoteGenerated: IntraNamespace

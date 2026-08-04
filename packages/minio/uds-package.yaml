@@ -1,0 +1,21 @@
+apiVersion: uds.dev/v1alpha1
+kind: Package
+metadata:
+  name: minio
+  namespace: minio-operator
+spec:
+  network:
+    allow:
+      - direction: Egress
+        remoteGenerated: KubeAPI
+        description: "operator watch/reconcile of Tenants"
+      - direction: Egress
+        remoteGenerated: IntraNamespace
+      - direction: Ingress
+        remoteGenerated: IntraNamespace
+      # The operator reaches tenant pods in app namespaces (sidecar/config
+      # sync); app-side ingress is declared by each app's Package. Egress
+      # from HERE to those namespaces:
+      - direction: Egress
+        remoteNamespace: "*"
+        description: "operator -> tenant pods in app namespaces (verify + tighten on the lab)"

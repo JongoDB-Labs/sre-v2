@@ -16,3 +16,13 @@ apps:
       identityRegexp: "^https://github.com/JongoDB-Labs/cosmos-v2/"
       issuer: "https://token.actions.githubusercontent.com"
     requires: [pgo]
+  - name: gitea
+    version: "1.27.0-5"
+    description: "Gitea — self-hosted git forge (mission app #2, first OSS onboarding)."
+    source:
+      type: oci
+      ref: ghcr.io/jongodb-labs/bundles/gitea
+    verify:
+      identityRegexp: "^https://github.com/JongoDB-Labs/sre-apps/"
+      issuer: "https://token.actions.githubusercontent.com"
+    requires: [pgo, minio]

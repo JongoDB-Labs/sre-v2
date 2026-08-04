@@ -38,6 +38,11 @@ components:
         namespace: minio-operator
         valuesFiles:
           - values.yaml
+    manifests:
+      - name: minio-uds-package
+        namespace: minio-operator
+        files:
+          - uds-package.yaml
     images:
       - quay.io/minio/operator:v7.1.1
       # The operator also runs an init+sidecar on each Tenant pod. operator-sidecar is

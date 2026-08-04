@@ -26,30 +26,41 @@ type Inspector interface {
 	Inspect(ref string) ([]byte, error)
 }
 
-// Preflight inspects the resolved package and returns advisory warnings: one if
-// no UDS Package CR is present (no auto-cohesion), and one per `requires` service
-// missing from the live cluster. It returns an error ONLY when the package cannot
-// be inspected at all (an I/O problem the caller should surface); cohesion and
-// requires gaps are warnings, because the deploy proceeds (the post-deploy confirm
-// in step 6 is authoritative).
+// Preflight returns advisory warnings: one if no UDS Package CR is present in
+// the inspected package (no auto-cohesion), and one per `requires` service
+// missing from the live cluster. The two checks have different dependencies:
+// the no-package-cr check needs zarf Inspect output, but the missing-require
+// check needs only installedRequires (the live installed-packages set, already
+// supplied by the caller) — so it runs and can still warn even when Inspect
+// fails. It returns an error ONLY when the package cannot be inspected at all
+// (an I/O problem the caller should surface); cohesion and requires gaps are
+// warnings, because the deploy proceeds (the post-deploy confirm in step 6 is
+// authoritative).
 //
-// Advisory error contract: the returned error is advisory — it signals only that
-// the cohesion scan could not run (e.g. a zarf Inspect I/O failure). Per spec §5.3,
-// the install MUST proceed even if preflight cannot scan. Callers SHOULD log this
-// error but MUST NOT abort the install on it. Genuine cohesion / requires gaps are
-// surfaced as Warnings, never as errors.
+// Advisory error contract: the returned error is advisory — it signals only
+// that the cohesion (no-package-cr) scan could not run (e.g. a zarf Inspect
+// I/O failure). Per spec §5.3, the install MUST proceed even if preflight
+// cannot scan. Callers SHOULD log this error but MUST NOT abort the install on
+// it. Genuine cohesion / requires gaps are surfaced as Warnings, never as
+// errors. Missing-require warnings are independent of this error: they are
+// still returned alongside a non-nil error when Inspect fails.
 func Preflight(z Inspector, e Entry, ref string, installedRequires map[string]bool) ([]Warning, error) {
-	out, err := z.Inspect(ref)
-	if err != nil {
-		return nil, fmt.Errorf("preflight: inspect %s: %w", ref, err)
-	}
 	var warns []Warning
-	if !hasPackageCR(out) {
+
+	out, err := z.Inspect(ref)
+	var inspectErr error
+	if err != nil {
+		inspectErr = fmt.Errorf("preflight: inspect %s: %w", ref, err)
+	} else if !hasPackageCR(out) {
 		warns = append(warns, Warning{
 			Code:    "no-package-cr",
 			Message: fmt.Sprintf("%s has no UDS Package CR; it will deploy but not auto-wire cohesion (ingress/SSO/netpol)", e.Name),
 		})
 	}
+
+	// Independent of Inspect: installedRequires is the live installed-packages
+	// set the caller already fetched, so this check must run even when the
+	// package itself could not be inspected.
 	for _, req := range e.Requires {
 		if !installedRequires[req] {
 			warns = append(warns, Warning{
@@ -58,7 +69,8 @@ func Preflight(z Inspector, e Entry, ref string, installedRequires map[string]bo
 			})
 		}
 	}
-	return warns, nil
+
+	return warns, inspectErr
 }
 
 // hasPackageCR reports whether zarf inspect output contains a UDS Package CR.
