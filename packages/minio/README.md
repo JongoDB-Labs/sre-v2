@@ -12,7 +12,8 @@ is the **lab/baseline** object store only.
 | | |
 |---|---|
 | Operator chart | `operator` 7.1.1 from `https://operator.min.io` (classic Helm repo) |
-| Operator image | `quay.io/minio/operator:v7.1.1` (also the Tenant init+sidecar) |
+| Operator image | `quay.io/minio/operator:v7.1.1` |
+| Tenant init+sidecar image | `quay.io/minio/operator-sidecar:v7.0.1` (pinned via `values.yaml`'s `operator.sidecarImage`) |
 | Tenant server image | `quay.io/minio/minio:RELEASE.2025-04-08T15-41-24Z` |
 | Tenant CRD | `minio.min.io/v2`, kind `Tenant` |
 

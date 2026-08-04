@@ -36,11 +36,17 @@ components:
         repoName: operator
         version: 7.1.1
         namespace: minio-operator
+        valuesFiles:
+          - values.yaml
     images:
       - quay.io/minio/operator:v7.1.1
-      # The operator also runs an init+sidecar on each Tenant pod; by default it uses
-      # the SAME operator image above. operator-sidecar exists as a split-out image but
-      # is NOT the chart default, so it isn't carried here.
+      # The operator also runs an init+sidecar on each Tenant pod. operator-sidecar is
+      # a split-out image, and v7.x's COMPILED-IN default already points at it
+      # (quay.io/minio/operator-sidecar:v7.0.1 — see
+      # pkg/resources/statefulsets/minio-sidecar.go) — it is NOT the same image as the
+      # operator above. Carried + pinned here (values.yaml sets operator.sidecarImage)
+      # so Tenant pods don't ImagePullBackOff under the zarf agent (final-review F1b).
+      - quay.io/minio/operator-sidecar:v7.0.1
       #
       # MinIO-server image apps' Tenants pull — the substrate carries it so mission apps
       # don't bundle it (this is the version the v7.1.1 tenant chart pins, matching the
