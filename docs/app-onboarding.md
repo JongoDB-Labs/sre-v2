@@ -336,7 +336,7 @@ pq: permission denied for schema public   (SQLSTATE 42501)
 ```
 
 Gitea hit this live at acceptance (`gitea migrate` failing 42501) — and it is now clear in
-hindsight that **this is exactly why the cosmos grants `SUPERUSER` and creates its own role in a migrate hook (see `docs/specs/gitea-onboarding-design.md` §0)**: SUPERUSER was cosmos's
+hindsight that **this is exactly why cosmos grants `SUPERUSER` and creates its own role in a migrate hook (see `docs/specs/gitea-onboarding-design.md` §0)**: SUPERUSER was cosmos's
 workaround for the same PG15+ ownership gap, not a cosmos-specific requirement. It is not
 the generic pattern; it just happened to sidestep the problem cosmos never diagnosed.
 
